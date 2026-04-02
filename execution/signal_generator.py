@@ -170,11 +170,11 @@ TRADE_HOUR_START_UTC  = int(os.getenv("TRADE_HOUR_START_UTC", "8"))
 TRADE_HOUR_END_UTC    = int(os.getenv("TRADE_HOUR_END_UTC", "3"))
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# FUNDING RATE FILTER (Binance Futures)
+# FUNDING RATE FILTER (Bybit Perpetual)
 # Crypto-specific institutional signal:
 #   funding > +THRESHOLD → longs overheated → avoid BUY
 #   funding < -THRESHOLD → shorts overheated → contrarian BUY ok
-# USE_FUNDING_FILTER=true → fetch from Binance Futures API
+# USE_FUNDING_FILTER=true → fetch from Bybit Perpetual API
 # FUNDING_MAX_LONG_PCT=0.10 → block if funding > 0.10%
 # FUNDING_CACHE_SEC=300 → cache 5min (funding updates every 8h)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -608,38 +608,29 @@ def _drop_unclosed_candle(ohlcv: List[List[float]], timeframe: str) -> Tuple[Lis
 # EXCHANGE BUILDER
 # -----------------------------
 def _build_exchange() -> ccxt.Exchange:
-    ex_name = os.getenv("EXCHANGE", "binance").strip().lower()
+    ex_name = os.getenv("EXCHANGE", "bybit").strip().lower()
     market_type = os.getenv("MARKET_TYPE", "spot").strip().lower()
 
-    if ex_name == "bybit":
-        api_key = os.getenv("BYBIT_API_KEY", "").strip()
-        api_secret = os.getenv("BYBIT_API_SECRET", "").strip()
-        return ccxt.bybit({
-            "enableRateLimit": True,
-            "apiKey": api_key,
-            "secret": api_secret,
-            "options": {"defaultType": market_type},
-        })
-
-    api_key = os.getenv("BINANCE_API_KEY", "").strip()
-    api_secret = os.getenv("BINANCE_API_SECRET", "").strip()
-    return ccxt.binance({
+    # Default: Bybit
+    api_key    = os.getenv("BYBIT_API_KEY",    "").strip()
+    api_secret = os.getenv("BYBIT_API_SECRET", "").strip()
+    return ccxt.bybit({
         "enableRateLimit": True,
-        "apiKey": api_key,
-        "secret": api_secret,
+        "apiKey":  api_key,
+        "secret":  api_secret,
         "options": {"defaultType": market_type},
     })
 
 
 EXCHANGE = _build_exchange()
 
-# Binance minimum qty per symbol (spot) — cache to avoid repeated API calls
+# Exchange minimum qty per symbol (spot) — cache to avoid repeated API calls
 _market_info_cache: dict = {}  # {symbol: {min_qty, min_notional, qty_step}}
 
 
 def _get_market_limits(symbol: str) -> dict:
     """
-    Binance spot minimum order constraints.
+    Exchange spot minimum order constraints.
     Returns: {min_qty: float, min_notional: float, qty_step: float}
     Cached per session — market info changes rarely.
     """
@@ -667,7 +658,7 @@ def _get_market_limits(symbol: str) -> dict:
 
 def _is_sellable_qty(symbol: str, qty: float, price: float) -> tuple:
     """
-    True თუ qty Binance minimum-ს აკმაყოფილებს.
+    True თუ qty Bybit minimum-ს აკმაყოფილებს.
     Returns (ok: bool, reason: str)
     """
     if qty <= 0:
@@ -676,7 +667,7 @@ def _is_sellable_qty(symbol: str, qty: float, price: float) -> tuple:
     if qty < lim["min_qty"]:
         return False, (
             f"qty={qty:.8f} < min_qty={lim['min_qty']} "
-            f"(Binance {symbol} minimum amount precision)"
+            f"(Bybit {symbol} minimum amount precision)"
         )
     notional = qty * price
     if notional < lim["min_notional"]:
@@ -789,7 +780,7 @@ def _vwap(ohlcv: List[List[float]]) -> float:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# FUNDING RATE — Binance Futures
+# FUNDING RATE — Bybit Perpetual
 # Institutional signal: high funding = crowded longs = reversal risk
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -798,13 +789,13 @@ _funding_cache: Dict[str, Tuple[float, float]] = {}  # symbol → (rate, timesta
 
 def _get_funding_rate(symbol: str) -> Optional[float]:
     """
-    Fetch current funding rate from Binance Futures for spot symbol.
+    Fetch current funding rate from Bybit Perpetual for spot symbol.
     Returns funding rate as float (e.g. 0.001 = 0.1%) or None on error.
 
     Caches result for FUNDING_CACHE_SEC seconds (default 5min).
-    Funding updates every 8h on Binance — cache is safe.
+    Funding updates every 8h on Bybit — cache is safe.
 
-    symbol: spot format "BTC/USDT" → futures "BTCUSDT"
+    symbol: spot format "BTC/USDT" → linear "BTCUSDT"
     """
     import time as _time
     now = _time.time()
@@ -816,20 +807,21 @@ def _get_funding_rate(symbol: str) -> Optional[float]:
             return cached_rate
 
     try:
-        # Convert spot symbol to futures format
+        # Convert spot symbol to Bybit linear format
         fut_symbol = symbol.replace("/", "")   # BTC/USDT → BTCUSDT
 
         import urllib.request
         import json as _json
         url = (
-            f"https://fapi.binance.com/fapi/v1/premiumIndex"
-            f"?symbol={fut_symbol}"
+            f"https://api.bybit.com/v5/market/tickers"
+            f"?category=linear&symbol={fut_symbol}"
         )
         req  = urllib.request.Request(url, headers={"User-Agent": "GeniusBot/1.0"})
         with urllib.request.urlopen(req, timeout=3) as resp:
             data = _json.loads(resp.read().decode())
 
-        rate = float(data.get("lastFundingRate", 0.0))
+        items = (data.get("result") or {}).get("list") or []
+        rate = float(items[0].get("fundingRate", 0.0)) if items else 0.0
         _funding_cache[symbol] = (rate, now)
 
         if GEN_DEBUG:
@@ -1550,11 +1542,11 @@ def generate_signal() -> Optional[Dict[str, Any]]:
                         last_price = closes_ah[-1] if closes_ah else 0.0
 
                         # Min notional guard — execution_engine-ი ყველა open amount-ს ყიდის
-                        # Binance minimum: ETH 0.0001, BNB 0.001 qty OR $10 notional
+                        # minimum: ETH 0.0001, BNB 0.001 qty OR $10 notional
                         # DYNAMIC_SIZE_MIN=8 USDT → $8 / price = qty
                         # partial TP-ის შემდეგ: 50% = $4 → ETH: 4/price qty
                         # safety: $5 minimum notional check
-                        _min_notional = 5.0  # USDT — Binance spot minimum ~$5-10
+                        _min_notional = 1.0  # USDT — Bybit spot minimum ~$1
                         # quote_in meta-ს execution_engine-ი კითხულობს — არ გვაქვს აქ
                         # signal-ში "close_all": True → execution_engine-ი position-ის
                         # ყველა amount-ს ყიდის (partial TP remainder included)
