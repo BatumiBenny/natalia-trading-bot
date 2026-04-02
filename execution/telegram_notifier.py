@@ -14,13 +14,22 @@ def _env_bool(name: str, default: str = "false") -> bool:
 
 
 TELEGRAM_ENABLED = _env_bool("TELEGRAM_NOTIFICATIONS", "false")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+
+def _clean_ascii(s: str) -> str:
+    """
+    Remove non-ASCII chars — prevent latin-1 UnicodeEncodeError in urllib3.
+    Telegram bot token and chat_id must be pure ASCII.
+    Copy-paste from Telegram can introduce invisible Unicode spaces.
+    """
+    return "".join(c for c in s if ord(c) < 128).strip()
+
+TELEGRAM_BOT_TOKEN = _clean_ascii(os.getenv("TELEGRAM_BOT_TOKEN", ""))
 TELEGRAM_CHAT_IDS = [
-    x.strip()
+    _clean_ascii(x)
     for x in os.getenv("TELEGRAM_CHAT_ID", "").split(",")
-    if x.strip()
+    if _clean_ascii(x)
 ]
-TELEGRAM_PARSE_MODE = os.getenv("TELEGRAM_PARSE_MODE", "HTML").strip().upper()
+TELEGRAM_PARSE_MODE = _clean_ascii(os.getenv("TELEGRAM_PARSE_MODE", "HTML")).upper()
 TELEGRAM_TIMEZONE = os.getenv("TELEGRAM_TIMEZONE", "Asia/Tbilisi").strip()
 
 
@@ -62,7 +71,17 @@ def send_telegram_message(text: str, disable_preview: bool = True) -> bool:
         }
 
         try:
-            r = requests.post(url, json=payload, timeout=15)
+            # FIX: explicit utf-8 encoding — prevents latin-1 UnicodeEncodeError
+            # in urllib3 when emoji/Georgian chars are in the message body.
+            # json= uses utf-8 internally, but older urllib3 versions
+            # can re-encode headers as latin-1. Force manual encoding.
+            import json as _json
+            encoded_body = _json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            headers = {
+                "Content-Type": "application/json; charset=utf-8",
+                "Accept": "application/json",
+            }
+            r = requests.post(url, data=encoded_body, headers=headers, timeout=15)
             if r.ok:
                 logger.info("TG_SEND_OK | chat_id=%s", chat_id)
                 ok_any = True
