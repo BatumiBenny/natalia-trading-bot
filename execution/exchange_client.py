@@ -73,9 +73,28 @@ class BinanceSpotClient:
             }
             self.exchange.options["fetchCurrencies"] = False
         elif self.mode == "LIVE" and live_rest_base:
-            self.exchange.urls["api"]["private"] = live_rest_base
-            self.exchange.urls["api"]["public"]  = live_rest_base
-            logger.info(f"BINANCE_REST_OVERRIDE | base={live_rest_base}")
+            # FIX: ყველა endpoint-ი ერთად შეიცვლება —
+            # api.binance.com → api.binance.me (ან სხვა regional endpoint)
+            # "api"  = REST v1/v3 (public + private orders)
+            # "sapi" = Wallet/Capital API (fetch_currencies, load_markets)
+            # "fapi" = Futures (არ გვჭირდება, მაგრამ ვცვლით სიმეტრიისთვის)
+            base = live_rest_base.rstrip("/")
+            # base from ENV: https://api.binance.me/api/v3
+            # extract host: https://api.binance.me
+            import re
+            host_match = re.match(r"(https?://[^/]+)", base)
+            host = host_match.group(1) if host_match else base
+
+            self.exchange.urls["api"]["public"]  = f"{host}/api/v3"
+            self.exchange.urls["api"]["private"] = f"{host}/api/v3"
+            # სავალუტო/capital endpoint — ეს იყო ბლოკის მიზეზი
+            if "sapi" in self.exchange.urls.get("api", {}):
+                self.exchange.urls["api"]["sapi"] = f"{host}/sapi/v1"
+            # fetchCurrencies გათიშვა — sapi/v1/capital/config/getall
+            # Render-ის IP-ს ეს endpoint ბლოკია Binance-ზე
+            # load_markets-ისთვის საკმარისია public endpoint-ი
+            self.exchange.options["fetchCurrencies"] = False
+            logger.info(f"BINANCE_REST_OVERRIDE | host={host} fetchCurrencies=disabled")
 
         # warm up markets for precision helpers
         try:
