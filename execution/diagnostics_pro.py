@@ -371,7 +371,7 @@ def check_oco_links(rep: Report, conn: sqlite3.Connection) -> int:
             f"BROKEN OCO: {len(broken)}",
             severity="CRITICAL" if not broken_ok else "INFO",
             fix=(
-                f"Binance-ზე გახსენი Open Orders და გააუქმე ეს {len(broken)} broken OCO.\n"
+                f"Bybit-ზე გახსენი Open Orders და გააუქმე ეს {len(broken)} broken OCO.\n"
                 f"        SQL fix: UPDATE oco_links SET status='closed' WHERE status='broken';\n"
                 f"        შემდეგ DB-ში ხელით გაუშვი ან: sqlite3 $DB_PATH \"UPDATE oco_links SET status='closed' WHERE status='broken';\""
                 if not broken_ok else ""
@@ -467,8 +467,8 @@ ENV_RULES: List[Tuple] = [
     ("ALLOW_LIVE_SIGNALS",     "true",       "eq",     "CRITICAL", "signals enabled"),
     ("LIVE_CONFIRMATION",      "true",       "eq",     "WARN",     "live confirmation"),
     # ─── API ─────────────────────────────────────────────────────
-    ("BINANCE_API_KEY",        None,         "nonempty","CRITICAL","Binance API key"),
-    ("BINANCE_API_SECRET",     None,         "nonempty","CRITICAL","Binance API secret"),
+    ("BYBIT_API_KEY",          None,         "nonempty","CRITICAL","Bybit API key"),
+    ("BYBIT_API_SECRET",       None,         "nonempty","CRITICAL","Bybit API secret"),
     # ─── Symbols ─────────────────────────────────────────────────
     ("BOT_SYMBOLS",            None,         "nonempty","CRITICAL","trading symbols"),
     ("BOT_TIMEFRAME",          "15m",        "eq",     "WARN",     "candle timeframe"),
@@ -761,7 +761,7 @@ def check_audit_events(rep: Report, conn: sqlite3.Connection, n: int = 5):
                 fix=(
                     "EXEC_REJECT_DRAWDOWN: MAX_ACCOUNT_DRAWDOWN limit გადაჭარბდა.\n"
                     "        → Render ENV → MAX_ACCOUNT_DRAWDOWN=20 (ან მეტი) და restart.\n"
-                    "        ყოვლისთვის: balance manually შეამოწმე Binance-ზე."
+                    "        ყოვლისთვის: balance manually შეამოწმე Bybit-ზე."
                 ) if "DRAWDOWN" in str(details) else
                 "EXEC_REJECT: execution_engine reject — details შეამოწმე"
             )
@@ -1020,44 +1020,44 @@ def check_pnl_consistency(rep: Report, conn: sqlite3.Connection):
 # =============================================================================
 
 def check_api_connectivity(rep: Report):
-    """Binance REST API ping — 3s timeout"""
+    """Bybit REST API ping — 3s timeout"""
     import urllib.request
     import json as _json
 
-    base = os.getenv("BINANCE_LIVE_REST_BASE", "https://api.binance.com/api/v3")
+    # Bybit public REST endpoint
+    base = "https://api.bybit.com/v5/market"
 
-    # 1. Ping
+    # 1. Ping — Bybit server time endpoint (public, no auth)
     try:
         req = urllib.request.Request(
-            f"{base}/ping",
+            "https://api.bybit.com/v5/market/time",
             headers={"User-Agent": "GeniusBot-Diag/1.0"}
         )
         with urllib.request.urlopen(req, timeout=3) as resp:
             ok = resp.status == 200
-        rep.add("API/ping", ok, f"Binance ping → {resp.status}",
-                fix="Binance API ping failed — network ან API endpoint შეამოწმე" if not ok else "")
+            data = _json.loads(resp.read().decode())
+        rep.add("API/ping", ok, f"Bybit ping → {resp.status}",
+                fix="Bybit API ping failed — network ან API endpoint შეამოწმე" if not ok else "")
     except Exception as e:
         rep.add("API/ping", False, str(e), "CRITICAL",
-                fix="Binance REST API მიუწვდომელია — Render outbound network შეამოწმე")
+                fix="Bybit REST API მიუწვდომელია — Render outbound network შეამოწმე")
         return
 
     # 2. Server time drift
     try:
-        req2 = urllib.request.Request(f"{base}/time",
-                                       headers={"User-Agent": "GeniusBot-Diag/1.0"})
-        with urllib.request.urlopen(req2, timeout=3) as resp2:
-            data = _json.loads(resp2.read().decode())
-        server_ms = data.get("serverTime", 0)
+        server_ms = int(data.get("result", {}).get("timeSecond", 0)) * 1000
+        if not server_ms:
+            server_ms = int(data.get("result", {}).get("timeNano", 0)) // 1_000_000
         local_ms  = int(time.time() * 1000)
         drift_ms  = abs(server_ms - local_ms)
         drift_ok  = drift_ms < 1000
         rep.add("API/time_drift", drift_ok,
                 f"drift={drift_ms}ms (max 1000ms)",
                 severity="WARN" if not drift_ok else "INFO",
-                fix=f"Clock drift {drift_ms}ms — server NTP sync შეამოწმე. Binance ითხოვს < 1000ms" if not drift_ok else "")
+                fix=f"Clock drift {drift_ms}ms — server NTP sync შეამოწმე. Bybit ითხოვს < 1000ms" if not drift_ok else "")
     except Exception as e:
         rep.add("API/time_drift", False, str(e), "WARN",
-                fix="Binance /time endpoint failed")
+                fix="Bybit /time endpoint parse failed")
 
 
 # =============================================================================
@@ -1078,10 +1078,10 @@ def check_and_suggest_oco_repair(rep: Report, conn: sqlite3.Connection):
         rep.add(
             "BROKEN_OCO/repair",
             False,
-            f"{len(broken)} broken OCO link(s) — Binance-ზე manual check საჭიროა!",
+            f"{len(broken)} broken OCO link(s) — Bybit-ზე manual check საჭიროა!",
             severity="CRITICAL",
             fix=(
-                f"ნაბიჯი 1: Binance Open Orders გახსენი და ეს orders გააუქმე:\n" +
+                f"ნაბიჯი 1: Bybit Open Orders გახსენი და ეს orders გააუქმე:\n" +
                 "".join(
                     f"          link_id={b.get('link_id','?')} symbol={b.get('symbol','?')} "
                     f"tp_order={b.get('tp_order_id','?')} sl_order={b.get('sl_order_id','?')}\n"
@@ -1102,7 +1102,7 @@ def check_and_suggest_oco_repair(rep: Report, conn: sqlite3.Connection):
                 f"symbol={b.get('symbol','?')} tp={b.get('tp_order_id','?')} "
                 f"sl={b.get('sl_order_id','?')} created={b.get('created_at','?')}",
                 severity="CRITICAL",
-                fix=f"Binance-ზე manually cancel order {b.get('tp_order_id','?')} და {b.get('sl_order_id','?')}"
+                fix=f"Bybit-ზე manually cancel order {b.get('tp_order_id','?')} და {b.get('sl_order_id','?')}"
             )
     except Exception as e:
         rep.add("BROKEN_OCO/check", False, str(e), "WARN",
@@ -1120,7 +1120,7 @@ def check_position_sync(rep: Report, trade: Dict, pos: Dict):
         ok = (qty == 0 or qty is None)
         rep.add("POSITION_SYNC", ok, f"pos_qty={qty}",
                 "CRITICAL" if not ok else "INFO",
-                fix=f"Position qty={qty} but trade={status} — Binance-ზე manually close position" if not ok else "")
+                fix=f"Position qty={qty} but trade={status} — Bybit-ზე manually close position" if not ok else "")
     else:
         rep.add("POSITION_SYNC", True, "open trade — skip")
 
@@ -1160,7 +1160,7 @@ def check_api_resilience(rep: Report, tp: Optional[Dict], sl: Optional[Dict]):
     ok = tp is not None and sl is not None
     rep.add("API_RESILIENCE", ok, "orders fetched",
             "CRITICAL" if not ok else "INFO",
-            fix="OCO orders fetch failed — Binance API key permissions შეამოწმე" if not ok else "")
+            fix="OCO orders fetch failed — Bybit API key permissions შეამოწმე" if not ok else "")
 
 
 def check_race_condition(rep: Report, adapter: Adapter, signal_id: str):
@@ -1176,7 +1176,7 @@ def check_latency(rep: Report, adapter: Adapter):
     ok  = lat < 2000
     rep.add("LATENCY", ok, f"{lat}ms (max=2000ms)",
             "WARN" if not ok else "INFO",
-            fix=f"High latency {lat}ms — Render region ან Binance endpoint შეამოწმე" if not ok else "")
+            fix=f"High latency {lat}ms — Render region ან Bybit endpoint შეამოწმე" if not ok else "")
 
 
 def check_slippage(rep: Report, expected_price: Any, actual_price: Any):
