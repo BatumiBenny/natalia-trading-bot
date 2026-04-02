@@ -70,9 +70,21 @@ class BinanceSpotClient:
 
         self.exchange = ccxt.bybit(exchange_config)
 
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # BYBIT GEO-BLOCK FIX
+        # Render-ის IP საქართველოდან — Bybit CloudFront ბლოკავს:
+        #   /v5/asset/coin/query-info  → fetchCurrencies
+        #   /v5/account/fee-rate       → fetchTradingFees
+        # ამ endpoint-ების გათიშვა load_markets-ამდე სავალდებულოა.
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        self.exchange.options["fetchCurrencies"]  = False
+        self.exchange.options["fetchTradingFees"] = False
+        self.exchange.options["fetchBalance"]     = "unified"  # Unified Trading Account
+
         # warm up markets for precision helpers
         try:
             self.exchange.load_markets()
+            logger.info("BYBIT_LOAD_MARKETS | OK")
         except Exception as e:
             logger.warning(f"LOAD_MARKETS_WARN | err={e}")
 
@@ -115,16 +127,16 @@ class BinanceSpotClient:
 
     def diagnostics(self) -> Dict[str, Any]:
         try:
-            bal = self.exchange.fetch_balance()
             sym = next(iter(self.symbol_whitelist)) if self.symbol_whitelist else "BTC/USDT"
             t = self.exchange.fetch_ticker(sym)
+            usdt_free = self.fetch_balance_free("USDT")
             return {
                 "mode": self.mode,
                 "kill_switch": self.kill_switch,
                 "live_confirmation": self.live_confirmation,
                 "symbol_probe": sym,
                 "last_price": float(t.get("last") or 0.0),
-                "usdt_free": float((bal.get("free", {}) or {}).get("USDT", 0.0) or 0.0),
+                "usdt_free": usdt_free,
                 "ok": True,
             }
         except Exception as e:
@@ -165,8 +177,16 @@ class BinanceSpotClient:
         return 0.0
 
     def fetch_balance_free(self, asset: str) -> float:
-        bal = self.exchange.fetch_balance()
-        return float((bal.get("free", {}) or {}).get(asset.upper(), 0.0) or 0.0)
+        try:
+            bal = self.exchange.fetch_balance({"type": "unified"})
+            free = float((bal.get("free", {}) or {}).get(asset.upper(), 0.0) or 0.0)
+            if free == 0.0:
+                bal2 = self.exchange.fetch_balance({"type": "spot"})
+                free = float((bal2.get("free", {}) or {}).get(asset.upper(), 0.0) or 0.0)
+            return free
+        except Exception as e:
+            logger.warning(f"FETCH_BALANCE_FAIL | asset={asset} err={e}")
+            return 0.0
 
     def fetch_order(self, order_id: str, symbol: str) -> Dict[str, Any]:
         return self.exchange.fetch_order(str(order_id), symbol)
