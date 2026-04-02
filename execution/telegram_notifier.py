@@ -316,7 +316,7 @@ def notify_trade_closed(
 
 def notify_performance_snapshot(stats: Dict[str, Any]) -> None:
     msg = (
-        f"📊 <b>BOT PERFORMANCE SNAPSHOT</b>\n\n"
+        f"📊 <b>GENIUS-DCA-BOT PERFORMANCE</b>\n\n"
         f"✅ <b>Closed trades:</b> <code>{int(stats.get('closed_trades', 0))}</code>\n"
         f"🏆 <b>Wins:</b> <code>{int(stats.get('wins', 0))}</code>\n"
         f"❌ <b>Losses:</b> <code>{int(stats.get('losses', 0))}</code>\n"
@@ -333,7 +333,7 @@ def notify_performance_snapshot(stats: Dict[str, Any]) -> None:
 
 def notify_daily_close_summary(daily_stats: Dict[str, Any]) -> None:
     msg = (
-        f"🌙 <b>DAILY CLOSE SUMMARY</b>\n\n"
+        f"🌙 <b>DAILY DCA CLOSE SUMMARY</b>\n\n"
         f"📅 <b>Date:</b> <code>{_escape_html(daily_stats.get('date', ''))}</code>\n"
         f"🕛 <b>Window:</b> <code>00:00 - 23:59 Asia/Tbilisi</code>\n\n"
         f"✅ <b>Closed today:</b> <code>{int(daily_stats.get('closed_trades', 0))}</code>\n"
