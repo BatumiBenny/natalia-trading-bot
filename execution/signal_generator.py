@@ -608,15 +608,52 @@ def _drop_unclosed_candle(ohlcv: List[List[float]], timeframe: str) -> Tuple[Lis
 # EXCHANGE BUILDER
 # -----------------------------
 def _build_exchange() -> ccxt.Exchange:
+    ex_name     = os.getenv("EXCHANGE", "binance").strip().lower()
     market_type = os.getenv("MARKET_TYPE", "spot").strip().lower()
+
+    if ex_name == "bybit":
+        api_key    = os.getenv("BYBIT_API_KEY",    "").strip()
+        api_secret = os.getenv("BYBIT_API_SECRET", "").strip()
+        logger.info(f"[GEN] EXCHANGE=bybit | market_type={market_type}")
+        return ccxt.bybit({
+            "enableRateLimit": True,
+            "apiKey":  api_key,
+            "secret":  api_secret,
+            "options": {"defaultType": market_type},
+        })
+
+    # Binance (default)
     api_key    = os.getenv("BINANCE_API_KEY",    "").strip()
     api_secret = os.getenv("BINANCE_API_SECRET", "").strip()
-    return ccxt.binance({
+
+    # BINANCE_LIVE_REST_BASE — allows override to api1/api2/api3.binance.com
+    # useful when primary api.binance.com is geo-blocked from server IP
+    rest_base = os.getenv("BINANCE_LIVE_REST_BASE", "").strip()
+
+    cfg: dict = {
         "enableRateLimit": True,
         "apiKey":  api_key,
         "secret":  api_secret,
         "options": {"defaultType": market_type},
-    })
+    }
+
+    if rest_base:
+        # extract hostname from full URL e.g. https://api1.binance.com/api/v3
+        import re as _re
+        m = _re.match(r"https?://([^/]+)", rest_base)
+        if m:
+            hostname = m.group(1)
+            cfg["urls"] = {
+                "api": {
+                    "public":  f"https://{hostname}/api/v3",
+                    "private": f"https://{hostname}/api/v3",
+                    "v3":      f"https://{hostname}/api/v3",
+                    "sapi":    f"https://{hostname}/sapi/v1",
+                }
+            }
+            logger.info(f"[GEN] EXCHANGE=binance | REST override → {hostname}")
+
+    return ccxt.binance(cfg)
 
 
 EXCHANGE = _build_exchange()
