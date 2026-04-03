@@ -63,7 +63,7 @@ MA_GAP_PCT = float(os.getenv("MA_GAP_PCT", "0.15"))
 # Flat 15m market confidence_score ≈ 0.30-0.42 range.
 # 0.38 ბლოკავდა real signals — ვხედავდით BLOCKED_BY_CONF_STATIC ხშირად.
 # 0.32 = meaningful quality gate, still filters noise (score<0.25 = random)
-BUY_CONFIDENCE_MIN = float(os.getenv("BUY_CONFIDENCE_MIN", "0.46"))  # ENV=0.46 (synced)
+BUY_CONFIDENCE_MIN = float(os.getenv("BUY_CONFIDENCE_MIN", "0.25"))  # DCA: 0.46→0.25
 
 BLOCK_SIGNALS_WHEN_ACTIVE_OCO = os.getenv("BLOCK_SIGNALS_WHEN_ACTIVE_OCO", "true").strip().lower() == "true"
 
@@ -75,7 +75,7 @@ GEN_LOG_EVERY_TICK = os.getenv("GEN_LOG_EVERY_TICK", "true").strip().lower() == 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # 1. Volume filter — 24h volume < MIN_VOLUME_24H → BUY skip
-MIN_VOLUME_24H = float(os.getenv("MIN_VOLUME_24H", "30000000"))  # ENV=30M USDT
+MIN_VOLUME_24H = float(os.getenv("MIN_VOLUME_24H", "5000000"))   # DCA: 30M→5M
 
 # 2. Signal expiration — signal ts_utc-დან SIGNAL_EXPIRATION_SECONDS გასული → skip
 SIGNAL_EXPIRATION_SECONDS = int(os.getenv("SIGNAL_EXPIRATION_SECONDS", "600"))  # ENV=600s
@@ -95,7 +95,7 @@ MAX_OPEN_TRADES = int(os.getenv("MAX_OPEN_TRADES", "2"))  # ENV=2 (synced)
 
 # 5. AI_FILTER_LOW_CONFIDENCE — ai_score < threshold → hard reject before any other check
 # true = strict mode: ყველა low-confidence signal drop-ი ყველა filter-ის წინ
-AI_FILTER_LOW_CONFIDENCE = os.getenv("AI_FILTER_LOW_CONFIDENCE", "false").strip().lower() == "true"
+AI_FILTER_LOW_CONFIDENCE = os.getenv("AI_FILTER_LOW_CONFIDENCE", "false").strip().lower() == "true"  # DCA: keep false
 AI_FILTER_MIN_SCORE      = float(os.getenv("BUY_CONFIDENCE_MIN", "0.46"))  # ENV=0.46 synced
 
 # 6. GEN_TEST_SIGNAL — force-emit one test signal for integration testing (true = one shot)
@@ -165,7 +165,7 @@ VWAP_SESSION_BARS     = int(os.getenv("VWAP_SESSION_BARS", "96"))      # ENV=96
 # TRADE_HOUR_START=7, TRADE_HOUR_END=22 → 07:00-22:00 UTC
 # (22:00-07:00 UTC = Asia low liquidity + wide spreads)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-USE_TIME_FILTER       = os.getenv("USE_TIME_FILTER", "true").strip().lower() == "true"
+USE_TIME_FILTER       = os.getenv("USE_TIME_FILTER", "false").strip().lower() == "true"  # DCA: off
 TRADE_HOUR_START_UTC  = int(os.getenv("TRADE_HOUR_START_UTC", "8"))
 TRADE_HOUR_END_UTC    = int(os.getenv("TRADE_HOUR_END_UTC", "3"))
 
@@ -178,7 +178,7 @@ TRADE_HOUR_END_UTC    = int(os.getenv("TRADE_HOUR_END_UTC", "3"))
 # FUNDING_MAX_LONG_PCT=0.10 → block if funding > 0.10%
 # FUNDING_CACHE_SEC=300 → cache 5min (funding updates every 8h)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-USE_FUNDING_FILTER    = os.getenv("USE_FUNDING_FILTER", "true").strip().lower() == "true"  # ENV=true
+USE_FUNDING_FILTER    = os.getenv("USE_FUNDING_FILTER", "false").strip().lower() == "true"  # DCA: off
 FUNDING_MAX_LONG_PCT  = float(os.getenv("FUNDING_MAX_LONG_PCT",  "0.10"))  # >0.10% = overbought
 FUNDING_MIN_SHORT_PCT = float(os.getenv("FUNDING_MIN_SHORT_PCT", "-0.05")) # <-0.05% = oversold
 FUNDING_CACHE_SEC     = int(os.getenv("FUNDING_CACHE_SEC", "300"))         # 5min cache
@@ -257,7 +257,7 @@ _protective_sell_ts: dict  = {}   # {symbol: float} — protective sell cooldown
 # -0.05 = სუსტი downtrend (default). -0.03 = უფრო მგრძნობიარე, -0.10 = გვიანი გასვლა
 SELL_TREND_THRESHOLD = float(os.getenv("SELL_TREND_THRESHOLD", "-0.05"))  # ENV=-0.05
 
-SL_COOLDOWN_COUNT   = int(os.getenv("SL_COOLDOWN_AFTER_N", "3"))       # ENV=3
+SL_COOLDOWN_COUNT   = int(os.getenv("SL_COOLDOWN_AFTER_N", "99"))      # DCA: გათიშული
 SL_COOLDOWN_PAUSE   = int(os.getenv("SL_COOLDOWN_PAUSE_SECONDS", "1800"))
 RECOVERY_CANDLES    = int(os.getenv("RECOVERY_GREEN_CANDLES", "3"))
 # FIX: 0.25% → 0.10% default. 15m flat ბაზარზე სანთლები 0.15-0.35%-ია.
@@ -1495,7 +1495,7 @@ def generate_signal() -> Optional[Dict[str, Any]]:
         # BTC-ზე 2 SL → მხოლოდ BTC ბლოკდება, ETH/BNB კვლავ ვაჭრობს.
         # open_trade-ის შემთხვევაში: SELL-ი კვლავ მუშაობს (bypass).
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        if not open_trade and _sl_pause_active_for_symbol(symbol):
+        if False and not open_trade and _sl_pause_active_for_symbol(symbol):  # DCA: disabled
             sym_state = get_sl_cooldown_state_per_symbol(symbol)
             pause_ts  = sym_state.get("sl_pause_until") or 0.0
             remaining = max(0, int(pause_ts - time.time()))
