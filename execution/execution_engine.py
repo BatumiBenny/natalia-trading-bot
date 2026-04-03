@@ -1467,8 +1467,8 @@ class ExecutionEngine:
         # DEAD PARAMS GUARDS — BUY-ის წინ, ყველა mode-ში
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-        # 1. MAX_CONSECUTIVE_LOSSES — N consecutive SL-ის შემდეგ EXEC block
-        if self.max_consecutive_losses > 0:
+        # 1. MAX_CONSECUTIVE_LOSSES — DCA MODE: გათიშულია (0=off)
+        if False and self.max_consecutive_losses > 0:  # DCA: disabled
             try:
                 # FIX: stats/losses/wins ამოღებულია — streak-ში არ გამოიყენებოდა
                 # და get_trade_stats local variable conflict-ს იწვევდა
@@ -1492,8 +1492,8 @@ class ExecutionEngine:
             except Exception as e:
                 logger.warning(f"CONSECUTIVE_LOSS_CHECK_FAIL | err={e} → skipped")
 
-        # 2. MAX_DAILY_LOSS — დღის P&L% ზარალი limit-ს გადასცდა?
-        if self.max_daily_loss_pct > 0:
+        # 2. MAX_DAILY_LOSS — DCA MODE: გათიშულია (0=off)
+        if False and self.max_daily_loss_pct > 0:  # DCA: disabled
             try:
                 from execution.db.repository import get_closed_trades
                 from datetime import datetime, timezone
@@ -1571,7 +1571,7 @@ class ExecutionEngine:
         #         → 2 ღია trade = -30$ false drawdown alarm.
         # ახალი: free_USDT + Σ(qty × entry_price) → რეალური portfolio value.
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        if self.max_account_drawdown_pct > 0 and self.exchange is not None:
+        if False and self.max_account_drawdown_pct > 0 and self.exchange is not None:  # DCA: disabled
             try:
                 free_usdt = float(self.exchange.fetch_balance_free("USDT"))
 
