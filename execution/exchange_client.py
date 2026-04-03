@@ -18,9 +18,7 @@ class LiveTradingBlocked(Exception):
 
 class BinanceSpotClient:
     """
-    Bybit Spot client — იგივე interface, Bybit backend.
-    კლასის სახელი შენარჩუნებულია (BinanceSpotClient) რათა
-    დანარჩენი კოდი (execution_engine.py და სხვა) ცვლილების გარეშე იმუშაოს.
+    Binance Spot client.
     """
 
     def __init__(self):
@@ -43,17 +41,17 @@ class BinanceSpotClient:
         )
 
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        # BYBIT API KEYS (Render ENV-დან)
+        # BINANCE API KEYS (Render ENV-დან)
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        api_key    = os.getenv("BYBIT_API_KEY",    "").strip()
-        api_secret = os.getenv("BYBIT_API_SECRET", "").strip()
+        api_key    = os.getenv("BINANCE_API_KEY",    "").strip()
+        api_secret = os.getenv("BINANCE_API_SECRET", "").strip()
 
         if self.mode in ("LIVE", "TESTNET"):
             if not api_key or not api_secret:
-                raise ExchangeClientError("Missing BYBIT_API_KEY / BYBIT_API_SECRET for LIVE/TESTNET.")
+                raise ExchangeClientError("Missing BINANCE_API_KEY / BINANCE_API_SECRET for LIVE/TESTNET.")
 
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        # ccxt.bybit — Spot რეჟიმი
+        # ccxt.binance — Spot რეჟიმი
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         exchange_config = {
             "apiKey":          api_key,
@@ -65,26 +63,20 @@ class BinanceSpotClient:
         }
 
         if self.mode == "TESTNET":
-            exchange_config["options"]["testnet"] = True
-            logger.info("BYBIT_TESTNET | testnet mode enabled")
+            exchange_config["urls"] = {
+                "api": {
+                    "public":  "https://testnet.binance.vision/api",
+                    "private": "https://testnet.binance.vision/api",
+                }
+            }
+            logger.info("BINANCE_TESTNET | testnet mode enabled")
 
-        self.exchange = ccxt.bybit(exchange_config)
-
-        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        # BYBIT GEO-BLOCK FIX
-        # Render-ის IP საქართველოდან — Bybit CloudFront ბლოკავს:
-        #   /v5/asset/coin/query-info  → fetchCurrencies
-        #   /v5/account/fee-rate       → fetchTradingFees
-        # ამ endpoint-ების გათიშვა load_markets-ამდე სავალდებულოა.
-        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        self.exchange.options["fetchCurrencies"]  = False
-        self.exchange.options["fetchTradingFees"] = False
-        self.exchange.options["fetchBalance"]     = "unified"  # Unified Trading Account
+        self.exchange = ccxt.binance(exchange_config)
 
         # warm up markets for precision helpers
         try:
             self.exchange.load_markets()
-            logger.info("BYBIT_LOAD_MARKETS | OK")
+            logger.info("BINANCE_LOAD_MARKETS | OK")
         except Exception as e:
             logger.warning(f"LOAD_MARKETS_WARN | err={e}")
 
@@ -292,9 +284,8 @@ class BinanceSpotClient:
 
     def place_oco_sell(self, symbol: str, base_amount: float, tp_price: float, sl_stop_price: float, sl_limit_price: float) -> Dict[str, Any]:
         """
-        Bybit Spot-ს native OCO არ აქვს Binance-ის მსგავსად.
-        ვათავსებთ ორ ცალკე ორდერს: Limit TP + Stop-Limit SL.
-        OCO semantics: execution_engine უნდა მართავდეს cancel-ს fill-ის შემდეგ.
+        Binance Spot native OCO sell order.
+        TP (Limit) + SL (Stop-Limit) ერთ OCO ბრძანებაში.
         """
         self._guard(symbol)
         try:
@@ -303,32 +294,22 @@ class BinanceSpotClient:
             sl_stop  = self._price_str(symbol, sl_stop_price)
             sl_limit = self._price_str(symbol, sl_limit_price)
 
-            # 1) TP — Limit Sell
-            tp_order = self._with_retry(
+            result = self._with_retry(
                 self.exchange.create_order,
-                symbol, "limit", "sell", float(qty), float(tp_px),
-                {"timeInForce": "GTC"},
-                label="OCO_TP"
-            )
-
-            # 2) SL — Stop-Limit Sell
-            sl_order = self._with_retry(
-                self.exchange.create_order,
-                symbol, "limit", "sell", float(qty), float(sl_limit),
+                symbol, "STOP_LOSS_LIMIT", "sell", float(qty), float(sl_limit),
                 {
-                    "triggerPrice": float(sl_stop),
-                    "triggerBy":    "LastPrice",
-                    "timeInForce":  "GTC",
+                    "stopPrice":      float(sl_stop),
+                    "aboveType":      "LIMIT_MAKER",
+                    "abovePrice":     float(tp_px),
+                    "belowType":      "STOP_LOSS_LIMIT",
+                    "belowStopPrice": float(sl_stop),
+                    "belowPrice":     float(sl_limit),
+                    "quantity":       float(qty),
+                    "newOrderRespType": "FULL",
                 },
-                label="OCO_SL"
+                label="OCO_SELL"
             )
 
-            return {
-                "raw": {
-                    "tp_order": tp_order,
-                    "sl_order": sl_order,
-                    "oco_emulated": True,
-                }
-            }
+            return {"raw": result}
         except Exception as e:
             raise ExchangeClientError(f"OCO sell failed: {e}")
