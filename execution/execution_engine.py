@@ -1924,219 +1924,80 @@ class ExecutionEngine:
             base_asset = symbol.split("/")[0].upper()
             free_base  = float(self.exchange.fetch_balance_free(base_asset))
 
-            # FIX EE-3: _safe_sell_amount for OCO placement
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # DCA MODE: OCO გათიშულია — exchange-ზე SL/TP ორდერი არ იდება.
+            # პოზიცია ღია რჩება. DCA manager-ი მართავს:
+            #   - add-on ყიდვებს ვარდნაზე
+            #   - TP-ს market sell-ით average entry + DCA_TP_PCT%-ზე
+            #   - SL-ს მხოლოდ confirmed trend breakdown-ზე (DCA_SL_PCT)
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             sell_amount = _safe_sell_amount(self.exchange, symbol, free_base * self.sell_buffer, float(buy_avg))
-            if sell_amount <= 0:
-                sell_amount = _safe_sell_amount(self.exchange, symbol, free_base * self.sell_retry_buffer, float(buy_avg))
-
-            if sell_amount <= 0:
-                msg = (
-                    f"OCO_SKIP_BELOW_MIN | id={signal_id} symbol={symbol} "
-                    f"free_{base_asset}={free_base:.8f} buy_avg={buy_avg:.4f} "
-                    f"(qty or notional below exchange minimum)"
-                )
-                logger.warning(msg)
-                log_event("OCO_SKIP_BELOW_MIN", msg)
-                return
-
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # FIX PARTIAL_TP1_FAIL: amount წინასწარ ვყოფთ
-            # FIX MIN_NOTIONAL: split მხოლოდ თუ ორივე ნაწილი >= min_notional
-            # $10 × 0.5 = $5 → Binance rejects (min $10) → fallback full OCO
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            _adp = adaptive if adaptive else {}
-            _use_partial = _adp.get("USE_PARTIAL_TP", self.use_partial_tp)
-            _tp1_size    = float(_adp.get("PARTIAL_TP1_SIZE", self.partial_tp1_size))
-
-            # Binance minimum notional per order ($10 default)
-            try:
-                _min_notional = float(self.exchange.get_min_notional(symbol) or 10.0)
-            except Exception:
-                _min_notional = 10.0
-
-            if _use_partial and 0 < _tp1_size < 1.0:
-                _oco_fraction  = 1.0 - _tp1_size
-                oco_amount     = self.exchange.floor_amount(symbol, sell_amount * _oco_fraction)
-                partial_amount = self.exchange.floor_amount(symbol, sell_amount * _tp1_size)
-
-                # MIN NOTIONAL CHECK: ორივე ნაწილი საკმარისი უნდა იყოს
-                _oco_notional     = oco_amount * float(buy_avg)
-                _partial_notional = partial_amount * float(buy_avg)
-
-                if oco_amount <= 0 or partial_amount <= 0:
-                    logger.warning(f"PARTIAL_TP_SPLIT_ZERO | fallback full OCO | id={signal_id}")
-                    oco_amount = sell_amount
-                    partial_amount = 0.0
-                    _use_partial = False
-                elif _oco_notional < _min_notional or _partial_notional < _min_notional:
-                    # FIX: split-ი Binance min-ზე ნაკლებია → გათიშე partial, OCO=100%
-                    logger.warning(
-                        f"PARTIAL_TP_BELOW_MIN_NOTIONAL | "
-                        f"oco={_oco_notional:.2f} partial={_partial_notional:.2f} "
-                        f"min={_min_notional:.2f} | fallback full OCO | id={signal_id}"
-                    )
-                    oco_amount = sell_amount
-                    partial_amount = 0.0
-                    _use_partial = False
-            else:
-                oco_amount     = sell_amount
-                partial_amount = 0.0
-                _use_partial   = False
 
             open_trade(
                 signal_id=signal_id,
                 symbol=str(symbol),
-                qty=float(sell_amount),        # DB-ში სრული qty (tracking-სთვის)
+                qty=float(sell_amount) if sell_amount > 0 else (float(quote_amount) / float(buy_avg)),
                 quote_in=float(quote_amount),
                 entry_price=float(buy_avg),
             )
 
-            tp_price = float(buy_avg) * (1.0 + tp_pct / 100.0)
-            sl_stop = float(buy_avg) * (1.0 - sl_pct / 100.0)
-            sl_limit = sl_stop * (1.0 - self.sl_limit_gap_pct / 100.0)
-
-            tp_price = self.exchange.floor_price(symbol, tp_price)
-            sl_stop = self.exchange.floor_price(symbol, sl_stop)
-            sl_limit = self.exchange.floor_price(symbol, sl_limit)
-
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # FIX GLOBAL-3: OCO PLACEMENT WITH ROLLBACK.
-            # ძველი კოდი: open_trade() DB INSERT → place_oco_sell() fail →
-            #   Exception caught → return. მაგრამ DB row დარჩა closed_at=NULL
-            #   → "phantom open" → MAX_OPEN_TRADES count გაფუჭებული,
-            #   has_open_trade_for_symbol() = True, position unprotected.
-            # ახალი: place_oco_sell() fail → delete_orphaned_trade() rollback
-            #   → market sell-ი (position დაცვა) → log + TG notification.
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # DCA position ასევე გაიხსნება dca_positions ცხრილში
             try:
-                oco = self.exchange.place_oco_sell(
-                    symbol=str(symbol),
-                    base_amount=float(oco_amount),   # FIX: partial portion reserved
-                    tp_price=float(tp_price),
-                    sl_stop_price=float(sl_stop),
-                    sl_limit_price=float(sl_limit),
+                from execution.db.repository import (
+                    open_dca_position,
+                    get_open_dca_position_for_symbol,
+                    add_dca_order,
                 )
-            except Exception as _oco_err:
-                # ━━ ROLLBACK: DB row-ი წაიშალოს — orphaned trade-ი თავიდან ავიცილოთ
-                logger.error(
-                    f"OCO_PLACE_FAIL | id={signal_id} symbol={symbol} err={_oco_err} "
-                    f"→ rolling back DB open_trade + emergency market sell"
-                )
-                log_event("OCO_PLACE_FAIL_ROLLBACK", f"{signal_id} {symbol} err={_oco_err}")
-                try:
-                    delete_orphaned_trade(signal_id)
-                    logger.warning(f"OCO_ROLLBACK_OK | id={signal_id} trade row deleted")
-                except Exception as _rb_err:
-                    logger.error(f"OCO_ROLLBACK_FAIL | id={signal_id} err={_rb_err} — manual intervention needed")
-                # ━━ Emergency market sell — position exchange-ზე ღიაა, ბოტი ვერ მართავს
-                try:
-                    _emg_free = float(self.exchange.fetch_balance_free(str(base_asset)))
-                    if _emg_free > 0:
-                        # FIX UNBOUNDLOCAL: import with alias (_safe_sell_amount_emg)
-                        # to avoid Python scoping conflict with the module-level
-                        # _safe_sell_amount function used earlier in this same function.
-                        # Python treats any name that appears in a local import as a
-                        # local variable throughout the ENTIRE function scope — so
-                        # 'from x import _safe_sell_amount' here caused UnboundLocalError
-                        # at line 1921 where the module-level version was called first.
-                        from execution.exchange_client import _safe_sell_amount as _safe_sell_amount_emg
-                        _emg_price = float(self.exchange.fetch_last_price(str(symbol)))
-                        _emg_qty = _safe_sell_amount_emg(
-                            self.exchange, str(symbol), _emg_free * self.sell_buffer, _emg_price
-                        )
-                        if _emg_qty > 0:
-                            self.exchange.place_market_sell(str(symbol), _emg_qty)
-                            logger.warning(
-                                f"OCO_FAIL_EMERGENCY_SELL | id={signal_id} symbol={symbol} "
-                                f"qty={_emg_qty:.8f} price≈{_emg_price:.4f}"
-                            )
-                            log_event("OCO_FAIL_EMERGENCY_SELL", f"{signal_id} {symbol} qty={_emg_qty:.8f}")
-                        else:
-                            logger.error(f"OCO_FAIL_EMERGENCY_SELL_SKIP | id={signal_id} qty below min")
-                except Exception as _emg_err:
-                    logger.error(
-                        f"OCO_FAIL_EMERGENCY_SELL_ERROR | id={signal_id} symbol={symbol} "
-                        f"err={_emg_err} — MANUAL INTERVENTION REQUIRED"
-                    )
-                    log_event("OCO_FAIL_EMERGENCY_SELL_ERROR", f"{signal_id} {symbol} err={_emg_err}")
-                mark_signal_id_executed(
-                    signal_id,
-                    signal_hash=signal_hash,
-                    action="OCO_PLACE_FAIL_ROLLED_BACK",
-                    symbol=str(symbol)
-                )
-                return
+                from execution.dca_tp_sl_manager import get_tp_sl_manager
 
-            raw = oco.get("raw") or {}
-            orders = raw.get("orders") or []
-            list_order_id = str(raw.get("orderListId") or "")
+                existing_dca = get_open_dca_position_for_symbol(str(symbol))
+                if not existing_dca:
+                    _tp_sl = get_tp_sl_manager()
+                    _tp_sl_prices = _tp_sl.calculate(float(buy_avg))
+                    _dca_qty = float(sell_amount) if sell_amount > 0 else (float(quote_amount) / float(buy_avg))
 
-            tp_order_id = ""
-            sl_order_id = ""
-
-            # Bybit emulated OCO — tp_order/sl_order in raw dict
-            if not tp_order_id and raw.get("tp_order"):
-                tp_order_id = str(raw["tp_order"].get("id") or "")
-            if not sl_order_id and raw.get("sl_order"):
-                sl_order_id = str(raw["sl_order"].get("id") or "")
-
-            # Fallback: Binance-style orders list
-            for x in orders:
-                oid = str(x.get("orderId") or x.get("id") or "")
-                typ = str(x.get("type") or "").upper()
-                if typ in ("LIMIT_MAKER", "LIMIT") and not tp_order_id:
-                    tp_order_id = oid
-                elif typ in ("STOP_LOSS_LIMIT", "STOP") and not sl_order_id:
-                    sl_order_id = oid
-
-            if not tp_order_id or not sl_order_id:
-                reports = raw.get("orderReports") or []
-                for rep in reports:
-                    oid = str(rep.get("orderId") or rep.get("id") or "")
-                    typ = str(rep.get("type") or "").upper()
-                    if typ in ("LIMIT_MAKER", "LIMIT") and not tp_order_id:
-                        tp_order_id = oid
-                    elif typ in ("STOP_LOSS_LIMIT", "STOP") and not sl_order_id:
-                        sl_order_id = oid
-
-            create_oco_link(
-                signal_id=signal_id,
-                symbol=str(symbol),
-                base_asset=base_asset,
-                tp_order_id=str(tp_order_id),
-                sl_order_id=str(sl_order_id),
-                tp_price=float(tp_price),
-                sl_stop_price=float(sl_stop),
-                sl_limit_price=float(sl_limit),
-                amount=float(oco_amount),     # FIX: OCO portion only
-            )
-
-            log_event("TRADE_LIVE_ARMED", f"{signal_id} {symbol} OCO_ARMED listOrderId={list_order_id} oco_amt={oco_amount} partial_amt={partial_amount}")
-
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # #5 PARTIAL TP — TP1 limit order
-            # FIX: partial_amount წინასწარ გამოყოფილია OCO-სგან
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            if _use_partial and partial_amount > 0:
-                try:
-                    self._place_partial_tp_order(
-                        signal_id=str(signal_id),
+                    pos_id = open_dca_position(
                         symbol=str(symbol),
-                        sell_amount=float(partial_amount),   # FIX: pre-split
-                        buy_avg=float(buy_avg),
-                        adaptive=_adp,
-                        _override_amount=True,               # skip internal size calc
+                        initial_entry_price=float(buy_avg),
+                        initial_qty=_dca_qty,
+                        initial_quote_spent=float(quote_amount),
+                        tp_price=_tp_sl_prices["tp_price"],
+                        sl_price=_tp_sl_prices["sl_price"],
                     )
-                except Exception as e:
-                    logger.warning(f"PARTIAL_TP_FAIL | id={signal_id} err={e}")
+
+                    add_dca_order(
+                        position_id=pos_id,
+                        symbol=str(symbol),
+                        order_type="INITIAL",
+                        entry_price=float(buy_avg),
+                        qty=_dca_qty,
+                        quote_spent=float(quote_amount),
+                        avg_entry_after=float(buy_avg),
+                        tp_after=_tp_sl_prices["tp_price"],
+                        sl_after=_tp_sl_prices["sl_price"],
+                        trigger_drawdown_pct=0.0,
+                        rsi_at_entry=0.0,
+                        atr_pct_at_entry=0.0,
+                        recovery_score=5,
+                        exchange_order_id=str(buy.get("id", "")),
+                    )
+
+                    log_event("DCA_POSITION_OPENED", f"{signal_id} {symbol} avg={buy_avg:.4f} qty={_dca_qty:.8f} tp={_tp_sl_prices['tp_price']:.4f} sl={_tp_sl_prices['sl_price']:.4f}")
+                    logger.info(f"DCA_POSITION_OPENED | {symbol} entry={buy_avg:.4f} tp={_tp_sl_prices['tp_price']:.4f} sl={_tp_sl_prices['sl_price']:.4f}")
+                else:
+                    logger.info(f"DCA_POSITION_EXISTS | {symbol} → skipped open (add-on will handle)")
+            except Exception as _dca_err:
+                logger.warning(f"DCA_OPEN_WARN | id={signal_id} err={_dca_err} → trade tracked in trades table only")
 
             try:
+                _dca_tp_pct = float(os.getenv("DCA_TP_PCT", "1.5"))
+                _dca_sl_pct = float(os.getenv("DCA_SL_PCT", "6.0"))
                 notify_signal_created(
                     symbol=str(symbol),
                     entry_price=float(buy_avg),
                     quote_amount=float(quote_amount),
-                    tp_price=float(tp_price),
-                    sl_price=float(sl_stop),
+                    tp_price=float(buy_avg) * (1.0 + _dca_tp_pct / 100.0),
+                    sl_price=float(buy_avg) * (1.0 - _dca_sl_pct / 100.0),
                     verdict="BUY",
                     mode=self.mode,
                 )
