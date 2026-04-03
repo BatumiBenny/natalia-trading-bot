@@ -608,13 +608,10 @@ def _drop_unclosed_candle(ohlcv: List[List[float]], timeframe: str) -> Tuple[Lis
 # EXCHANGE BUILDER
 # -----------------------------
 def _build_exchange() -> ccxt.Exchange:
-    ex_name = os.getenv("EXCHANGE", "bybit").strip().lower()
     market_type = os.getenv("MARKET_TYPE", "spot").strip().lower()
-
-    # Default: Bybit
-    api_key    = os.getenv("BYBIT_API_KEY",    "").strip()
-    api_secret = os.getenv("BYBIT_API_SECRET", "").strip()
-    return ccxt.bybit({
+    api_key    = os.getenv("BINANCE_API_KEY",    "").strip()
+    api_secret = os.getenv("BINANCE_API_SECRET", "").strip()
+    return ccxt.binance({
         "enableRateLimit": True,
         "apiKey":  api_key,
         "secret":  api_secret,
@@ -807,21 +804,21 @@ def _get_funding_rate(symbol: str) -> Optional[float]:
             return cached_rate
 
     try:
-        # Convert spot symbol to Bybit linear format
+        # Binance Futures funding rate for spot symbol
         fut_symbol = symbol.replace("/", "")   # BTC/USDT → BTCUSDT
 
         import urllib.request
         import json as _json
         url = (
-            f"https://api.bybit.com/v5/market/tickers"
-            f"?category=linear&symbol={fut_symbol}"
+            f"https://fapi.binance.com/fapi/v1/premiumIndex"
+            f"?symbol={fut_symbol}"
         )
         req  = urllib.request.Request(url, headers={"User-Agent": "GeniusBot/1.0"})
         with urllib.request.urlopen(req, timeout=3) as resp:
             data = _json.loads(resp.read().decode())
 
-        items = (data.get("result") or {}).get("list") or []
-        rate = float(items[0].get("fundingRate", 0.0)) if items else 0.0
+        rate = float(data.get("lastFundingRate", 0.0)) if data else 0.0
+        items = [data] if data else []
         _funding_cache[symbol] = (rate, now)
 
         if GEN_DEBUG:
