@@ -124,7 +124,7 @@ class ExecutionEngine:
         self.env_kill_switch = _cfg.KILL_SWITCH
         self.live_confirmation = _cfg.LIVE_CONFIRMATION
 
-        self.price_feed = ccxt.bybit({
+        self.price_feed = ccxt.binance({
             "enableRateLimit": True,
             "options": {
                 "defaultType":      "spot",
