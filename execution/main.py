@@ -521,13 +521,9 @@ def main():
 
                         regime  = regime_engine.detect_regime(trend=trend, atr_pct=atr_pct)
 
-                        # SKIP safety-net only — sig["adaptive"] არ გადაიწერება
-                        if regime in ("BEAR", "VOLATILE", "SIDEWAYS"):
-                            logger.warning(
-                                f"[AUTO] SKIP_SAFETY_NET | regime={regime} "
-                                f"trend={trend:.3f} atr={atr_pct:.3f} | id={signal_id}"
-                            )
-                            continue
+                        # DCA MODE: regime block გათიშულია — ვაჭრობა ყველა რეჟიმში
+                        # if regime in ("BEAR", "VOLATILE", "SIDEWAYS"): → disabled
+                        logger.info(f"[AUTO] regime={regime} trend={trend:.3f} atr={atr_pct:.3f} → DCA mode, no block")
 
                         logger.info(
                             f"[AUTO] Regime={regime} trend={trend:.3f} "
