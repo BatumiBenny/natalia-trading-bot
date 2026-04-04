@@ -1963,6 +1963,11 @@ class ExecutionEngine:
                         initial_quote_spent=float(quote_amount),
                         tp_price=_tp_sl_prices["tp_price"],
                         sl_price=_tp_sl_prices["sl_price"],
+                        tp_pct=float(_tp_sl_prices["tp_pct"]),
+                        sl_pct=float(_tp_sl_prices["sl_pct"]),
+                        max_add_ons=int(os.getenv("DCA_MAX_ADD_ONS", "2")),
+                        max_capital=float(os.getenv("DCA_MAX_CAPITAL_USDT", "30.0")),
+                        max_drawdown_pct=float(os.getenv("DCA_MAX_DRAWDOWN_PCT", "80.0")),
                     )
 
                     add_dca_order(
