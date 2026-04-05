@@ -275,20 +275,18 @@ def notify_signal_created(
     entry_price: float,
     quote_amount: float,
     tp_price: float,
-    sl_price: float,
+    sl_price: float = 0.0,
     verdict: str = "BUY",
     mode: str = "LIVE",
 ) -> None:
     tp_pct = ((float(tp_price) - float(entry_price)) / float(entry_price) * 100.0) if float(entry_price) else 0.0
-    sl_pct = ((float(sl_price) - float(entry_price)) / float(entry_price) * 100.0) if float(entry_price) else 0.0
 
     msg = (
         f"🚀 <b>NEW SIGNAL OPENED</b>\n\n"
         f"🪙 <b>Symbol:</b> <code>{_escape_html(symbol)}</code>\n"
         f"💰 <b>Entry:</b> <code>{_fmt_price(entry_price)}</code> USDT\n"
         f"📦 <b>Size:</b> <code>{_fmt_plain(quote_amount, 2)}</code> USDT\n"
-        f"🎯 <b>TP:</b> <code>{_fmt_price(tp_price)}</code> ({_fmt_pct(tp_pct)})\n"
-        f"🛑 <b>SL:</b> <code>{_fmt_price(sl_price)}</code> ({_fmt_pct(sl_pct)})\n\n"
+        f"🎯 <b>TP:</b> <code>{_fmt_price(tp_price)}</code> ({_fmt_pct(tp_pct)})\n\n"
         f"🧠 <b>Verdict:</b> <code>{_escape_html(verdict)}</code>\n"
         f"📌 <b>Mode:</b> <code>{_escape_html(mode)}</code>\n"
         f"🕒 <b>Time:</b> <code>{_now_str()}</code>"
@@ -377,22 +375,20 @@ def notify_dca_position_opened(
     qty: float,
     quote_spent: float,
     tp_price: float,
-    sl_price: float,
-    tp_pct: float,
-    sl_pct: float,
+    sl_price: float = 0.0,
+    tp_pct: float = 0.0,
+    sl_pct: float = 0.0,
     max_add_ons: int = 3,
     max_capital: float = 40.0,
 ) -> None:
     """ახალი DCA position გახსნილია."""
     tp_pct_f = float(tp_pct)
-    sl_pct_f = float(sl_pct)
     msg = (
         f"📈 <b>DCA POSITION OPENED</b>\n\n"
         f"🪙 <b>Symbol:</b> <code>{_escape_html(symbol)}</code>\n"
         f"💰 <b>Entry:</b> <code>{_fmt_price(entry_price)}</code> USDT\n"
         f"📦 <b>Size:</b> <code>{_fmt_plain(quote_spent, 2)}</code> USDT\n"
         f"🎯 <b>TP:</b> <code>{_fmt_price(tp_price)}</code> (<code>{_fmt_pct(tp_pct_f)}</code>)\n"
-        f"🛑 <b>SL:</b> <code>{_fmt_price(sl_price)}</code> (<code>{_fmt_pct(-sl_pct_f)}</code>)\n"
         f"🔄 <b>Max add-ons:</b> <code>{max_add_ons}</code>\n"
         f"💼 <b>Max capital:</b> <code>{_fmt_plain(max_capital, 1)}</code> USDT\n"
         f"🕒 <b>Time:</b> <code>{_now_str()}</code>"
@@ -408,9 +404,9 @@ def notify_dca_addon(
     new_avg_entry: float,
     total_quote_spent: float,
     new_tp_price: float,
-    new_sl_price: float,
-    drawdown_pct: float,
-    recovery_score: int,
+    new_sl_price: float = 0.0,
+    drawdown_pct: float = 0.0,
+    recovery_score: int = 0,
 ) -> None:
     """DCA add-on order გახსნილია."""
     msg = (
@@ -422,7 +418,6 @@ def notify_dca_addon(
         f"📊 <b>New avg entry:</b> <code>{_fmt_price(new_avg_entry)}</code>\n"
         f"💼 <b>Total spent:</b> <code>{_fmt_plain(total_quote_spent, 2)}</code> USDT\n"
         f"🎯 <b>New TP:</b> <code>{_fmt_price(new_tp_price)}</code>\n"
-        f"🛑 <b>New SL:</b> <code>{_fmt_price(new_sl_price)}</code>\n"
         f"🔍 <b>Recovery score:</b> <code>{recovery_score}/5</code>\n"
         f"🕒 <b>Time:</b> <code>{_now_str()}</code>"
     )
@@ -481,15 +476,14 @@ def notify_dca_closed(
 def notify_dca_breakeven(
     symbol: str,
     avg_entry_price: float,
-    old_sl: float,
-    new_sl: float,
+    old_sl: float = 0.0,
+    new_sl: float = 0.0,
 ) -> None:
-    """Breakeven stop ამოქმედდა."""
+    """Breakeven protection ამოქმედდა."""
     msg = (
         f"🔒 <b>DCA BREAKEVEN ACTIVATED</b>\n\n"
         f"🪙 <b>Symbol:</b> <code>{_escape_html(symbol)}</code>\n"
         f"📊 <b>Avg entry:</b> <code>{_fmt_price(avg_entry_price)}</code>\n"
-        f"🛑 <b>SL moved:</b> <code>{_fmt_price(old_sl)}</code> → <code>{_fmt_price(new_sl)}</code>\n"
         f"✅ <b>Position protected at breakeven</b>\n"
         f"🕒 <b>Time:</b> <code>{_now_str()}</code>"
     )
