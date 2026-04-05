@@ -201,7 +201,7 @@ MACD_HIST_ATR_FACTOR  = float(os.getenv("MACD_HIST_ATR_FACTOR", "0.2"))  # ENV=0
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # #3 Trailing Stop
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TRAILING_STOP_ENABLED   = os.getenv("TRAILING_STOP_ENABLED", "true").strip().lower() == "true"   # ENV=true
+TRAILING_STOP_ENABLED   = os.getenv("TRAILING_STOP_ENABLED", "false").strip().lower() == "true"   # ENV=true
 # FIX WIN-8: TRAILING_STOP_DISTANCE 0.25→0.35
 # BTC/ETH 15m candle noise ≈ 0.20-0.30%. 0.25% trailing = noise trigger.
 # 0.35% = beyond typical 15m noise, still locks in profits on real moves.
@@ -226,7 +226,7 @@ PARTIAL_TP1_SIZE      = float(os.getenv("PARTIAL_TP1_SIZE", "0.5"))
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # #7 Breakeven Stop
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-USE_BREAKEVEN_STOP    = os.getenv("USE_BREAKEVEN_STOP", "true").strip().lower() == "true"
+USE_BREAKEVEN_STOP    = os.getenv("USE_BREAKEVEN_STOP", "false").strip().lower() == "true"
 # FIX WIN-9: BREAKEVEN_TRIGGER_PCT 0.40→0.30
 # Activates breakeven protection when price is 0.30% above entry (was 0.40%).
 # Earlier activation = more trades protected from reverting to SL loss.
