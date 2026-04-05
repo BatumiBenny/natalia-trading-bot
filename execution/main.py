@@ -502,17 +502,21 @@ def main():
                     # ძველი კოდი SELL-საც ჩერდებოდა SIDEWAYS-ზე!
                     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                     if verdict == "SELL":
-                        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                        # DCA MODE: SELL სიგნალი გათიშულია!
-                        # DCA სტრატეგიაზე ჩვენ ვინახავთ პოზიციას ვარდნისას.
-                        # SELL სიგნალი DCA trade-ს დახურავდა ზარალზე.
-                        # DCA manager-ი მართავს გაყიდვას TP-ზე.
-                        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                        logger.info(
-                            f"[AUTO] SELL signal → DCA MODE: blocked | "
-                            f"id={signal_id} source={sig.get('meta', {}).get('source', 'UNKNOWN')}"
-                        )
-                        # engine.execute_signal(sig)  # DCA: disabled
+                        source = sig.get("meta", {}).get("source", "UNKNOWN")
+                        if source == "PROTECTIVE_SELL":
+                            # crash guard — ATR EXTREME + KILL risk → გაყიდვა
+                            logger.warning(
+                                f"[AUTO] PROTECTIVE_SELL → executing | "
+                                f"id={signal_id} source={source}"
+                            )
+                            engine.execute_signal(sig)
+                        else:
+                            # TREND_REVERSAL / RSI_OVERBOUGHT — DCA-ში ბლოკი
+                            # DCA TP-ს ელოდება, არ გაყიდის ვარდნაზე
+                            logger.info(
+                                f"[AUTO] SELL blocked (DCA holds) | "
+                                f"id={signal_id} source={source}"
+                            )
 
                     elif verdict == "TRADE":
                         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
