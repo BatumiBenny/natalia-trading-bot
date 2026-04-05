@@ -258,7 +258,7 @@ class DCAPositionManager:
         # add-on limits
         self.max_add_ons     = _ei("DCA_MAX_ADD_ONS", 3)
         self.max_capital     = _ef("DCA_MAX_CAPITAL_USDT", 40.0)
-        self.max_drawdown    = _ef("DCA_MAX_DRAWDOWN_PCT", 8.0)
+        self.max_drawdown    = _ef("DCA_MAX_DRAWDOWN_PCT", 999.0)
 
         # trigger drawdowns per add-on level (list)
         self.trigger_pcts = _parse_list_float(
