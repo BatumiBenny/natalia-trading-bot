@@ -1423,7 +1423,8 @@ def generate_signal() -> Optional[Dict[str, Any]]:
                 return sym.upper()[: -len(q)]
         return sym.upper()
 
-    # Parse correlation groups from ENV (default: all symbols in one group)
+    # Parse correlation groups from ENV
+    # CORRELATION_GROUPS= ცარიელი → კორელაცია გათიშულია, თითოეული სიმბოლო დამოუკიდებელია
     _raw_corr_groups = os.getenv("CORRELATION_GROUPS", "").strip()
     if _raw_corr_groups:
         _corr_groups: List[set] = [
@@ -1432,8 +1433,8 @@ def generate_signal() -> Optional[Dict[str, Any]]:
             if grp.strip()
         ]
     else:
-        # Default: all active symbols form one correlated group (conservative)
-        _corr_groups = [{_base_asset(s) for s in SYMBOLS}]
+        # DCA: ცარიელი = კორელაცია გათიშული, ყველა symbol დამოუკიდებელია
+        _corr_groups = []
 
     # Snapshot: which bases currently have an open trade (DB query once per call)
     _open_bases: set = set()
