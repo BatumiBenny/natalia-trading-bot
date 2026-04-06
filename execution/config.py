@@ -10,7 +10,6 @@
 import os
 from pathlib import Path
 
-
 # ─────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────
@@ -33,7 +32,6 @@ def _env_int(name: str, default: int) -> int:
 def _env_str(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
 
-
 # ─────────────────────────────────────────────
 # MODE & SECURITY
 # ─────────────────────────────────────────────
@@ -46,7 +44,6 @@ LIVE_CONFIRMATION    = _env_bool("LIVE_CONFIRMATION",    "true")   # SYNC: was "
 KILL_SWITCH          = _env_bool("KILL_SWITCH",          "false")  # SYNC: was "true" — dangerous default
 STARTUP_SYNC_ENABLED = _env_bool("STARTUP_SYNC_ENABLED", "true")
 
-
 # ─────────────────────────────────────────────
 # BINANCE API
 # ─────────────────────────────────────────────
@@ -55,13 +52,11 @@ BINANCE_API_KEY        = _env_str("BINANCE_API_KEY",        "")
 BINANCE_API_SECRET     = _env_str("BINANCE_API_SECRET",     "")
 BINANCE_LIVE_REST_BASE = _env_str("BINANCE_LIVE_REST_BASE", "https://api.binance.com/api/v3")
 
-
 # ─────────────────────────────────────────────
 # DATABASE
 # ─────────────────────────────────────────────
 
 DB_PATH = Path(_env_str("DB_PATH", "/var/data/genius_bot_v2.db"))
-
 
 # ─────────────────────────────────────────────
 # TRADING SYMBOLS & TIMEFRAMES
@@ -73,7 +68,6 @@ BOT_TIMEFRAME    = _env_str("BOT_TIMEFRAME",    "15m")
 MTF_TIMEFRAME    = _env_str("MTF_TIMEFRAME",    "1h")
 BOT_CANDLE_LIMIT = _env_int("BOT_CANDLE_LIMIT", 300)
 
-
 # ─────────────────────────────────────────────
 # POSITION & CAPITAL SIZING
 # ─────────────────────────────────────────────
@@ -81,25 +75,18 @@ BOT_CANDLE_LIMIT = _env_int("BOT_CANDLE_LIMIT", 300)
 # SYNC: was 15.0 in config.py — signal_generator.py uses 10 → ENV=10 → aligned to 10
 BOT_QUOTE_PER_TRADE  = _env_float("BOT_QUOTE_PER_TRADE",  10.0)   # SYNC: 15→10
 MAX_QUOTE_PER_TRADE  = _env_float("MAX_QUOTE_PER_TRADE",  10.0)   # SYNC: 15→10
-QUOTE_SIZE_BULL      = _env_float("QUOTE_SIZE_BULL",      10.0)   # BULL regime-ზე პირდაპირი USDT ზომა
-QUOTE_SIZE_UNCERTAIN = _env_float("QUOTE_SIZE_UNCERTAIN",  7.0)    # UNCERTAIN regime-ზე პირდაპირი USDT ზომა
 BOT_POSITION_SIZE    = _env_float("BOT_POSITION_SIZE",     0.0)
 
 CAPITAL_USAGE_MAX      = _env_float("CAPITAL_USAGE_MAX",      0.80)
 CAPITAL_USAGE_MIN      = _env_float("CAPITAL_USAGE_MIN",      0.30)
-MAX_PORTFOLIO_EXPOSURE = _env_float("MAX_PORTFOLIO_EXPOSURE", 0.65)  # SYNC: 0.75→0.65
-MAX_SYMBOL_EXPOSURE    = _env_float("MAX_SYMBOL_EXPOSURE",    0.40)
 
 USE_DYNAMIC_SIZING     = _env_bool("USE_DYNAMIC_SIZING",     "true")
 ALLOW_POSITION_SCALING = _env_bool("ALLOW_POSITION_SCALING", "false")
 # SYNC: was 5.0/15.0 in config.py — signal_generator.py uses 8.0/10.0 → align
-DYNAMIC_SIZE_MIN     = _env_float("DYNAMIC_SIZE_MIN",    8.0)   # SYNC: 5→8
-DYNAMIC_SIZE_MAX     = _env_float("DYNAMIC_SIZE_MAX",   10.0)   # SYNC: 15→10
 DYNAMIC_SIZE_AI_LOW  = _env_float("DYNAMIC_SIZE_AI_LOW",  0.55)
 DYNAMIC_SIZE_AI_HIGH = _env_float("DYNAMIC_SIZE_AI_HIGH", 0.80)
 
 VIRTUAL_START_BALANCE = _env_float("VIRTUAL_START_BALANCE", 100000.0)
-
 
 # ─────────────────────────────────────────────
 # RISK MANAGEMENT
@@ -112,9 +99,6 @@ MAX_TRADES_PER_DAY       = _env_int("MAX_TRADES_PER_DAY",      10)   # SYNC: 25�
 MAX_TRADES_PER_HOUR      = _env_int("MAX_TRADES_PER_HOUR",      3)   # SYNC: 8→3
 MAX_CONSECUTIVE_LOSSES   = _env_int("MAX_CONSECUTIVE_LOSSES",   5)   # SYNC: 3→5
 MAX_DAILY_LOSS           = _env_float("MAX_DAILY_LOSS",         3.0)  # SYNC: 2.0→3.0
-MAX_ACCOUNT_DRAWDOWN     = _env_float("MAX_ACCOUNT_DRAWDOWN",   999.0)
-MAX_RISK_PER_TRADE_PCT   = _env_float("MAX_RISK_PER_TRADE_PCT", 0.0)
-
 
 # ─────────────────────────────────────────────
 # TP / SL / ATR
@@ -136,11 +120,9 @@ USE_PARTIAL_TP   = _env_bool("USE_PARTIAL_TP", "true")
 PARTIAL_TP1_PCT  = _env_float("PARTIAL_TP1_PCT",  1.0)   # SYNC: 1.5→1.0
 PARTIAL_TP1_SIZE = _env_float("PARTIAL_TP1_SIZE", 0.5)
 
-USE_BREAKEVEN_STOP    = _env_bool("USE_BREAKEVEN_STOP",    "false")
 BREAKEVEN_TRIGGER_PCT = _env_float("BREAKEVEN_TRIGGER_PCT", 0.48)  # ENV=0.48
 
 # SYNC: config.py had false/0.25 — signal_generator.py uses true/0.35 → align
-TRAILING_STOP_ENABLED  = _env_bool("TRAILING_STOP_ENABLED",  "false")  # SYNC: false→true
 TRAILING_STOP_DISTANCE = _env_float("TRAILING_STOP_DISTANCE", 0.25)   # ENV=0.25
 
 # SYNC: config.py had 2 — signal_generator.py uses 3 → align
@@ -152,14 +134,12 @@ SL_LIMIT_GAP_PCT          = _env_float("SL_LIMIT_GAP_PCT",        0.15)
 RECOVERY_CANDLE_PCT    = _env_float("RECOVERY_CANDLE_PCT",    0.05)  # ENV=0.05
 RECOVERY_GREEN_CANDLES = _env_int("RECOVERY_GREEN_CANDLES",   2)     # ENV=2
 
-
 # ─────────────────────────────────────────────
 # SIGNAL FILTERS & AI THRESHOLDS
 # ─────────────────────────────────────────────
 
 # SYNC: was 1.15 in config.py — signal_generator.py uses 1.05 → align
 AI_CONFIDENCE_BOOST      = _env_float("AI_CONFIDENCE_BOOST",    1.05)  # SYNC: 1.15→1.05
-AI_EXECUTE_MIN_SCORE     = _env_float("AI_EXECUTE_MIN_SCORE",   0.40)  # ENV=0.40
 # SYNC: was 0.45 — disabled in ENV (=0) → default 0 = disabled
 AI_SIGNAL_THRESHOLD      = _env_float("AI_SIGNAL_THRESHOLD",    0.0)   # SYNC: 0.45→0 (disabled)
 # SYNC: was true — blocks too aggressively in live market → false
@@ -172,7 +152,6 @@ BUY_LIQUIDITY_MIN_SCORE = _env_float("BUY_LIQUIDITY_MIN_SCORE", 0.0)   # DCA: of
 # FIX GLOBAL-6: THRESHOLD_CONF / THRESHOLD_TREND / THRESHOLD_VOLUME —
 # ეს სამი ცვლადი DEAD CODE-ია: signal_generator.py და execution_engine.py
 # BUY_CONFIDENCE_MIN / WEIGHT_* ცვლადებს იყენებს პირდაპირ (os.getenv-ით).
-# THRESHOLD_CONF=0.32 == BUY_CONFIDENCE_MIN=0.32 == AI_EXECUTE_MIN_SCORE=0.32
 # სამი სახელი, ერთი მნიშვნელობა — კონფუზიის წყარო.
 # ყველა ემყარება BUY_CONFIDENCE_MIN-ს. THRESHOLD_* ამოღება safe:
 # ბოტი არ კითხულობს ამ ცვლადებს სადამე სიგნალ-გენერაციაში.
@@ -199,7 +178,6 @@ ENABLE_SOFT_VOLUME_OVERRIDE = _env_bool("ENABLE_SOFT_VOLUME_OVERRIDE", "true")
 SOFT_VOLUME_AI_MIN          = _env_float("SOFT_VOLUME_AI_MIN",  0.40)  # SYNC: 0.58→0.40
 SOFT_VOLUME_RELAX           = _env_float("SOFT_VOLUME_RELAX",   0.10)
 SOFT_VOLUME_REQUIRE_VOLBAND = _env_bool("SOFT_VOLUME_REQUIRE_VOLBAND", "false")  # SYNC: true→false
-
 
 # ─────────────────────────────────────────────
 # FILTERS (MA / MACD / MTF / RSI / ADX / VWAP)
@@ -234,7 +212,6 @@ MTF_BLOCK_ON_BEAR_DIVERGE = _env_bool("MTF_BLOCK_ON_BEAR_DIVERGE", "false")
 MTF_TP_BONUS    = _env_float("MTF_TP_BONUS",    0.25)
 MTF_TP_PENALTY  = _env_float("MTF_TP_PENALTY",  0.20)
 
-
 # ─────────────────────────────────────────────
 # REGIME / ADAPTIVE
 # ─────────────────────────────────────────────
@@ -248,10 +225,7 @@ REGIME_BULL_TREND_MIN    = _env_float("REGIME_BULL_TREND_MIN",    0.30)
 REGIME_SIDEWAYS_ATR_MAX  = _env_float("REGIME_SIDEWAYS_ATR_MAX",  0.20)  # SYNC: 0.18→0.20
 REGIME_CONF_BULL_MULT    = _env_float("REGIME_CONF_BULL_MULT",    0.85)
 REGIME_CONF_UNCERTAIN_MULT = _env_float("REGIME_CONF_UNCERTAIN_MULT", 1.20)
-REGIME_SIZE_BULL_PCT     = _env_float("REGIME_SIZE_BULL_PCT",     1.00)
-REGIME_SIZE_UNCERTAIN_PCT = _env_float("REGIME_SIZE_UNCERTAIN_PCT", 0.50)
 REGIME_STABILITY_MIN     = _env_float("REGIME_STABILITY_MIN",     0.60)
-REGIME_HISTORY_DEPTH     = _env_int("REGIME_HISTORY_DEPTH",       10)
 
 STRUCT_SOFT_OVERRIDE       = _env_bool("STRUCT_SOFT_OVERRIDE",       "true")
 STRUCT_SOFT_MIN_MA_GAP     = _env_float("STRUCT_SOFT_MIN_MA_GAP",   0.10)
@@ -267,22 +241,16 @@ WEIGHT_RISK       = _env_float("WEIGHT_RISK",       0.15)
 WEIGHT_CONFIDENCE = _env_float("WEIGHT_CONFIDENCE", 0.15)
 WEIGHT_VOLATILITY = _env_float("WEIGHT_VOLATILITY", 0.07)
 
-
 # ─────────────────────────────────────────────
 # EXECUTION
 # ─────────────────────────────────────────────
 
-ENTRY_MODE      = _env_str("ENTRY_MODE",      "MARKET")
 EXECUTION_STYLE = _env_str("EXECUTION_STYLE", "FAST")
 
 LIMIT_ENTRY_OFFSET_PCT  = _env_float("LIMIT_ENTRY_OFFSET_PCT",  0.03)
 LIMIT_ENTRY_TIMEOUT_SEC = _env_int("LIMIT_ENTRY_TIMEOUT_SEC",   15)
 
-ORDER_RETRY_COUNT    = _env_int("ORDER_RETRY_COUNT",    3)
-ORDER_RETRY_DELAY_MS = _env_int("ORDER_RETRY_DELAY_MS", 400)
-
 ESTIMATED_ROUNDTRIP_FEE_PCT = _env_float("ESTIMATED_ROUNDTRIP_FEE_PCT", 0.14)
-ESTIMATED_SLIPPAGE_PCT      = _env_float("ESTIMATED_SLIPPAGE_PCT",      0.05)
 
 SELL_TREND_THRESHOLD = _env_float("SELL_TREND_THRESHOLD", -0.05)  # ENV=-0.05
 SELL_BUFFER       = _env_float("SELL_BUFFER",       0.999)
@@ -291,19 +259,15 @@ SELL_RETRY_BUFFER = _env_float("SELL_RETRY_BUFFER", 0.998)
 BLOCK_SIGNALS_WHEN_ACTIVE_OCO = _env_bool("BLOCK_SIGNALS_WHEN_ACTIVE_OCO", "true")
 DEDUPE_ONLY_WHEN_ACTIVE_OCO   = _env_bool("DEDUPE_ONLY_WHEN_ACTIVE_OCO",   "false")
 
-ALLOW_LIVE_SIGNALS          = _env_bool("ALLOW_LIVE_SIGNALS",          "true")   # SYNC: false→true
 LOOP_SLEEP_SECONDS          = _env_int("LOOP_SLEEP_SECONDS",           20)
 BOT_SIGNAL_COOLDOWN_SECONDS = _env_int("BOT_SIGNAL_COOLDOWN_SECONDS",  120)
-SIGNAL_EXPIRATION_SECONDS   = _env_int("SIGNAL_EXPIRATION_SECONDS",    600)
 
 USE_KELLY_SIZING      = _env_bool("USE_KELLY_SIZING",      "false")  # SYNC: not in old config → add
 USE_ADAPTIVE_SIZING   = _env_bool("USE_ADAPTIVE_SIZING",   "true")
 
 PORTFOLIO_ENABLED = _env_bool("PORTFOLIO_ENABLED", "false")
 
-
 SIGNAL_OUTBOX_PATH = _env_str("SIGNAL_OUTBOX_PATH", "/var/data/signal_outbox.json")
-
 
 # ─────────────────────────────────────────────
 # TELEGRAM
@@ -317,14 +281,12 @@ TELEGRAM_TIMEZONE             = _env_str("TELEGRAM_TIMEZONE",              "Asia
 TELEGRAM_REPORT_EVERY_SECONDS = _env_int("TELEGRAM_REPORT_EVERY_SECONDS",  10800)
 REPORT_EVERY_SECONDS          = _env_int("REPORT_EVERY_SECONDS",           60)
 
-
 # ─────────────────────────────────────────────
 # DEBUG / TEST
 # ─────────────────────────────────────────────
 
 GEN_DEBUG       = _env_bool("GEN_DEBUG",       "true")
 GEN_TEST_SIGNAL = _env_bool("GEN_TEST_SIGNAL", "false")
-
 
 # ─────────────────────────────────────────────
 # DCA — Dollar Cost Averaging
