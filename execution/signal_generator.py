@@ -1456,7 +1456,11 @@ def generate_signal() -> Optional[Dict[str, Any]]:
     # GLOBAL pause-ი ნარჩუნდება მხოლოდ recovery check-ისთვის ქვემოთ.
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    sl_state = get_sl_cooldown_state()
+    try:
+        sl_state = get_sl_cooldown_state()
+    except Exception as _sl_err:
+        logger.warning(f"[GEN] SL_STATE_FAIL | err={_sl_err} → skipping cooldown check")
+        sl_state = {"consecutive_sl": 0, "sl_pause_until": ""}
     # FIX: თუ პაუზა დროით გაიარა (is_sl_pause_active()=False) მაგრამ
     # consecutive_sl ჯერ კიდევ >= limit-ია DB-ში → recovery check საჭიროა.
     # თუ recovery_candles=3 და ბაზარი flat-ია (0.15-0.20% სანთლები) →
@@ -1498,6 +1502,7 @@ def generate_signal() -> Optional[Dict[str, Any]]:
             reset_consecutive_sl()
 
     for symbol in SYMBOLS:
+        logger.info(f"[GEN] LOOP_START | symbol={symbol}")
         active_oco = _has_active_oco(symbol)
         open_trade = _has_open_trade(symbol)
 
@@ -1625,6 +1630,7 @@ def generate_signal() -> Optional[Dict[str, Any]]:
 
         try:
             ohlcv = _fetch_ohlcv_direct(symbol, TIMEFRAME, CANDLE_LIMIT)
+            logger.info(f"[GEN] OHLCV_FETCHED | symbol={symbol} candles={len(ohlcv) if ohlcv else 0}")
         except Exception as e:
             logger.exception(f"[GEN] FETCH_FAIL | symbol={symbol} tf={TIMEFRAME} err={e}")
             continue
