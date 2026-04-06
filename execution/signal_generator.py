@@ -1027,6 +1027,16 @@ def _volume_score(vols: List[float]) -> Tuple[float, float]:
 
 
 def _confidence_score(closes: List[float], ohlcv: List[List[float]], use_ma: bool) -> float:
+    """
+    DCA-optimized confidence score — flat ბაზარზე neutral (არ ბლოკავს).
+
+    კომპონენტები (use_ma=False):
+      cond_last_prev  (0.30) — ბოლო სანთელი დადებითია
+      cond_slope      (0.20) — SMA slope: flat=0.5 neutral, up=1.0, down=0.0
+      cond_atr        (0.20) — ATR ნორმალური ზონა (0.05-2.0%)
+      cond_rsi        (0.20) — RSI 20-70 ზონა
+      cond_ups        (0.10) — ბოლო 3 სანთლიდან 2+ მწვანე
+    """
     if len(closes) < 20 or len(ohlcv) < 20:
         return 0.0
 
@@ -1036,22 +1046,26 @@ def _confidence_score(closes: List[float], ohlcv: List[List[float]], use_ma: boo
     slope = _slope_sma(closes)
 
     cond_last_prev = 1.0 if last > prev else 0.0
-    cond_atr = 1.0 if atrp < 2.0 else 0.0
-    cond_slope = max(0.0, min(1.0, slope / 0.003))
+    cond_atr = 1.0 if (0.05 <= atrp < 2.0) else (0.5 if atrp < 0.05 else 0.0)
+    cond_slope = max(0.0, min(1.0, 0.5 + slope / 0.006))
+    rsi_val = _rsi(closes, 14)
+    cond_rsi = 1.0 if 20.0 <= rsi_val <= 70.0 else 0.3
+    ups3 = _ups_count(closes, 3)
+    cond_ups = 1.0 if ups3 >= 2 else (0.5 if ups3 == 1 else 0.0)
 
     if use_ma:
         ma20 = _sma(closes, 20)
-        cond_ma = 1.0 if last > ma20 else 0.0
-        raw = (0.35 * cond_ma) + (0.35 * cond_last_prev) + (0.20 * cond_slope) + (0.10 * cond_atr)
+        cond_ma = 1.0 if last > ma20 else 0.3
+        raw = (0.25*cond_ma + 0.25*cond_last_prev + 0.15*cond_slope + 0.15*cond_atr + 0.15*cond_rsi + 0.05*cond_ups)
     else:
-        raw = (0.45 * cond_last_prev) + (0.35 * cond_slope) + (0.20 * cond_atr)
+        raw = (0.30*cond_last_prev + 0.20*cond_slope + 0.20*cond_atr + 0.20*cond_rsi + 0.10*cond_ups)
 
-    # AI_CONFIDENCE_BOOST — ENV-ით კონფიგურირებადი score multiplier (default=1.0, ENV=1.15)
-    # _clamp 1.0-ზე: boost ამაღლებს score-ს, მაგრამ 1.0-ს ვერ გადააჭარბებს
     boosted = min(1.0, raw * AI_CONFIDENCE_BOOST)
-    if GEN_DEBUG and AI_CONFIDENCE_BOOST != 1.0:
-        logger.debug(
-            f"[CONF_BOOST] raw={raw:.3f} × {AI_CONFIDENCE_BOOST} = {boosted:.3f}"
+    if GEN_DEBUG:
+        logger.info(
+            f"[CONF] last_prev={cond_last_prev:.1f} slope={cond_slope:.2f} "
+            f"atr={cond_atr:.1f} rsi={cond_rsi:.1f}(val={rsi_val:.1f}) "
+            f"ups={cond_ups:.1f} raw={raw:.3f} boosted={boosted:.3f}"
         )
     return boosted
 
