@@ -1377,6 +1377,10 @@ class ExecutionEngine:
 
         sp = self._get_spread_pct(symbol)
         if sp is not None and sp > self.max_spread_pct:
+            logger.warning(
+                f"[SPREAD_BLOCKED] symbol={symbol} spread={sp:.4f}% > max={self.max_spread_pct:.4f}% "
+                f"→ raise max_spread_pct or wait for tighter spread"
+            )
             raise RuntimeError(f"SPREAD_TOO_WIDE spread%={sp:.4f} > MAX_SPREAD_PCT={self.max_spread_pct:.4f}")
 
         buy = self.exchange.place_market_buy_by_quote(symbol=symbol, quote_amount=quote_amount)
@@ -1415,8 +1419,12 @@ class ExecutionEngine:
             return
 
         if not sync_ok or db_status not in ("ACTIVE", "RUNNING"):
-            logger.warning(f"EXEC_BLOCKED | system not ACTIVE/synced | id={signal_id} status={db_status} sync_ok={sync_ok}")
-            log_event("EXEC_BLOCKED_SYSTEM_STATE", f"{signal_id}")
+            logger.warning(
+                f"EXEC_BLOCKED | system not ACTIVE/synced | id={signal_id} "
+                f"status={db_status!r} sync_ok={sync_ok} "
+                f"→ FIX: Set status=ACTIVE and startup_sync_ok=1 in system_state table"
+            )
+            log_event("EXEC_BLOCKED_SYSTEM_STATE", f"{signal_id} status={db_status} sync_ok={sync_ok}")
             return
 
         if self.mode == "LIVE" and not self.live_confirmation:
@@ -1455,6 +1463,7 @@ class ExecutionEngine:
 
         # BUY path only — certified_signal check
         if signal.get("certified_signal") is not True:
+            logger.warning(f"EXEC_REJECT | REJECT_NOT_CERTIFIED | id={signal_id} certified={signal.get('certified_signal')!r}")
             log_event("REJECT_NOT_CERTIFIED", f"{signal_id}")
             return
 
@@ -1682,7 +1691,10 @@ class ExecutionEngine:
         try:
             ok_edge, edge_reason = self._net_edge_ok(tp_pct=tp_pct)
             if not ok_edge:
-                msg = f"EXEC_REJECT | EDGE_GATE | id={signal_id} symbol={symbol} {edge_reason}"
+                msg = (
+                    f"EXEC_REJECT | EDGE_GATE | id={signal_id} symbol={symbol} {edge_reason} "
+                    f"→ FIX: Increase DCA_TP_PCT or decrease ESTIMATED_ROUNDTRIP_FEE_PCT/MIN_NET_PROFIT_PCT"
+                )
                 logger.warning(msg)
                 log_event("EXEC_REJECT_EDGE_GATE", msg)
                 mark_signal_id_executed(signal_id, signal_hash=signal_hash, action="REJECT_EDGE_GATE", symbol=str(symbol))
