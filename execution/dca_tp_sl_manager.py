@@ -65,7 +65,7 @@ class DCATpSlManager:
     """
 
     def __init__(self) -> None:
-        self.tp_pct              = _ef("DCA_TP_PCT",                  2.0)
+        self.tp_pct              = _ef("DCA_TP_PCT",                  0.55)   # FIX: default 0.55% (was 2.0%)
         self.sl_pct              = _ef("DCA_SL_PCT",                  999.0)  # DCA: default=999 (disabled)
         self.sl_confirm_candles  = _ei("DCA_SL_CONFIRM_CANDLES",      2)
         self.breakeven_trigger   = _ef("DCA_BREAKEVEN_TRIGGER_PCT",    0.5)
