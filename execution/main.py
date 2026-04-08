@@ -171,10 +171,15 @@ def _run_dca_loop(engine, dca_mgr, tp_sl_mgr, risk_mgr) -> None:
         sym = pos["symbol"]
         pos_id = pos["id"]
 
+        # Layer 2 symbol — "_L2" suffix ამოვიღოთ exchange call-ებისთვის
+        # DB-ში "BTC/USDT_L2" ინახება, Binance-ს "BTC/USDT" სჭირდება
+        exchange_sym = sym.replace("_L2", "") if sym.endswith("_L2") else sym
+        is_layer2 = sym.endswith("_L2")
+
         try:
             # current price
             try:
-                current_price = engine.exchange.fetch_last_price(sym)
+                current_price = engine.exchange.fetch_last_price(exchange_sym)
                 current_price = float(current_price) if current_price else 0.0
             except Exception as _pe:
                 logger.warning(f"[DCA] PRICE_FETCH_ERR | {sym} err={_pe}")
@@ -201,7 +206,7 @@ def _run_dca_loop(engine, dca_mgr, tp_sl_mgr, risk_mgr) -> None:
             if tp_price > 0 and current_price >= tp_price:
                 logger.info(f"[DCA] TP_HIT | {sym} price={current_price:.4f} >= tp={tp_price:.4f}")
                 try:
-                    sell = engine.exchange.place_market_sell(sym, total_qty)
+                    sell = engine.exchange.place_market_sell(exchange_sym, total_qty)
                     exit_price = float(sell.get("average") or sell.get("price") or current_price)
                     pnl_quote = (exit_price - avg_entry) * total_qty
                     pnl_pct   = (exit_price / avg_entry - 1.0) * 100.0
@@ -210,7 +215,7 @@ def _run_dca_loop(engine, dca_mgr, tp_sl_mgr, risk_mgr) -> None:
                     close_dca_position(pos_id, exit_price, total_qty, pnl_quote, pnl_pct, "TP")
 
                     # ── FIX: trades ცხრილის დახურვა ───────────────────
-                    _open_tr = get_open_trade_for_symbol(sym)
+                    _open_tr = get_open_trade_for_symbol(exchange_sym)
                     if _open_tr:
                         close_trade(_open_tr[0], exit_price, "TP", pnl_quote, pnl_pct)
                         logger.info(f"[DCA] TRADE_CLOSED_TP | {sym} signal_id={_open_tr[0]} pnl={pnl_quote:+.4f}")
@@ -245,7 +250,7 @@ def _run_dca_loop(engine, dca_mgr, tp_sl_mgr, risk_mgr) -> None:
             if force_close:
                 logger.warning(f"[DCA] FORCE_CLOSE | {sym} reason={fc_reason}")
                 try:
-                    sell = engine.exchange.place_market_sell(sym, total_qty)
+                    sell = engine.exchange.place_market_sell(exchange_sym, total_qty)
                     exit_price = float(sell.get("average") or sell.get("price") or current_price)
                     pnl_quote = (exit_price - avg_entry) * total_qty
                     pnl_pct   = (exit_price / avg_entry - 1.0) * 100.0
@@ -253,7 +258,7 @@ def _run_dca_loop(engine, dca_mgr, tp_sl_mgr, risk_mgr) -> None:
                     close_dca_position(pos_id, exit_price, total_qty, pnl_quote, pnl_pct, "FORCE_CLOSE")
 
                     # ── FIX: trades ცხრილის დახურვა ───────────────────
-                    _open_tr = get_open_trade_for_symbol(sym)
+                    _open_tr = get_open_trade_for_symbol(exchange_sym)
                     if _open_tr:
                         close_trade(_open_tr[0], exit_price, "FORCE_CLOSE", pnl_quote, pnl_pct)
                         logger.info(f"[DCA] TRADE_CLOSED_FC | {sym} signal_id={_open_tr[0]} pnl={pnl_quote:+.4f}")
@@ -278,7 +283,7 @@ def _run_dca_loop(engine, dca_mgr, tp_sl_mgr, risk_mgr) -> None:
             try:
                 from execution.signal_generator import _fetch_ohlcv_direct
                 tf = os.getenv("BOT_TIMEFRAME", "15m")
-                ohlcv = _fetch_ohlcv_direct(sym, tf, 60)
+                ohlcv = _fetch_ohlcv_direct(exchange_sym, tf, 60)
             except Exception as e:
                 logger.warning(f"[DCA] OHLCV_FAIL | {sym} err={e}")
                 continue
@@ -292,7 +297,7 @@ def _run_dca_loop(engine, dca_mgr, tp_sl_mgr, risk_mgr) -> None:
                 if sl_confirmed:
                     logger.info(f"[DCA] SL_CONFIRMED | {sym} reason={sl_reason}")
                     try:
-                        sell = engine.exchange.place_market_sell(sym, total_qty)
+                        sell = engine.exchange.place_market_sell(exchange_sym, total_qty)
                         exit_price = float(sell.get("average") or sell.get("price") or current_price)
                         pnl_quote = (exit_price - avg_entry) * total_qty
                         pnl_pct   = (exit_price / avg_entry - 1.0) * 100.0
@@ -300,7 +305,7 @@ def _run_dca_loop(engine, dca_mgr, tp_sl_mgr, risk_mgr) -> None:
                         close_dca_position(pos_id, exit_price, total_qty, pnl_quote, pnl_pct, "SL")
 
                         # ── FIX: trades ცხრილის დახურვა ───────────────
-                        _open_tr = get_open_trade_for_symbol(sym)
+                        _open_tr = get_open_trade_for_symbol(exchange_sym)
                         if _open_tr:
                             close_trade(_open_tr[0], exit_price, "SL", pnl_quote, pnl_pct)
                             logger.info(f"[DCA] TRADE_CLOSED_SL | {sym} signal_id={_open_tr[0]} pnl={pnl_quote:+.4f}")
@@ -433,6 +438,188 @@ def _run_dca_loop(engine, dca_mgr, tp_sl_mgr, risk_mgr) -> None:
             logger.warning(f"[DCA] POSITION_LOOP_ERR | {sym} id={pos_id} err={e}")
 
 
+def _check_and_open_layer2(engine, tp_sl_mgr) -> None:
+    """
+    Layer 2 — Crash Detection & Parallel Trading.
+
+    ლოგიკა:
+      1. თითო symbol-ისთვის 24h HIGH ამოიღე
+      2. თუ current_price <= HIGH × (1 - LAYER2_DROP_PCT/100) → crash!
+      3. Layer 2 პოზიცია უკვე ღიაა? → გამოტოვე
+      4. USDT ბალანსი საკმარისია? → გახსენი Layer 2
+
+    ENV:
+      LAYER2_DROP_PCT=5.0      ← HIGH-დან რამდენი % ვარდნაზე გაიხსნოს
+      LAYER2_ENABLED=true      ← ჩართვა/გამორთვა
+      LAYER2_QUOTE=10.0        ← Layer 2-ის trade ზომა
+      LAYER2_SYMBOLS=BTC/USDT,BNB/USDT,ETH/USDT
+    """
+    import os
+
+    # Layer 2 ჩართულია?
+    if not os.getenv("LAYER2_ENABLED", "true").strip().lower() in ("1", "true", "yes"):
+        return
+
+    from execution.db.repository import (
+        get_open_dca_position_for_symbol,
+        open_dca_position,
+        add_dca_order,
+        open_trade,
+        log_event,
+    )
+
+    drop_pct    = float(os.getenv("LAYER2_DROP_PCT",  "5.0"))
+    quote       = float(os.getenv("LAYER2_QUOTE",     "10.0"))
+    symbols_raw = os.getenv("LAYER2_SYMBOLS", "BTC/USDT,BNB/USDT,ETH/USDT")
+    symbols     = [s.strip() for s in symbols_raw.split(",") if s.strip()]
+    tp_pct      = float(os.getenv("DCA_TP_PCT", "0.55"))
+    buffer      = float(os.getenv("SMART_ADDON_BUFFER", "5.0"))
+
+    # USDT ბალანსი
+    try:
+        free_usdt = float(engine.exchange.fetch_balance_free("USDT") or 0.0)
+    except Exception as _e:
+        logger.warning(f"[LAYER2] balance_fetch_fail | err={_e}")
+        return
+
+    for sym in symbols:
+        try:
+            # current price
+            current_price = float(engine.exchange.fetch_last_price(exchange_sym) or 0.0)
+            if current_price <= 0:
+                continue
+
+            # 24h HIGH — ohlcv 1d candle
+            try:
+                ticker = engine.price_feed.fetch_ticker(sym)
+                high_24h = float(ticker.get("high") or ticker.get("info", {}).get("highPrice") or 0.0)
+            except Exception:
+                high_24h = 0.0
+
+            if high_24h <= 0:
+                logger.debug(f"[LAYER2] NO_HIGH | {sym} → skip")
+                continue
+
+            drop_from_high = (high_24h - current_price) / high_24h * 100.0
+
+            logger.info(
+                f"[LAYER2] CHECK | {sym} price={current_price:.4f} "
+                f"high24h={high_24h:.4f} drop={drop_from_high:.2f}% "
+                f"trigger={drop_pct:.1f}%"
+            )
+
+            # crash trigger?
+            if drop_from_high < drop_pct:
+                logger.debug(f"[LAYER2] NO_CRASH | {sym} drop={drop_from_high:.2f}% < {drop_pct:.1f}%")
+                continue
+
+            # Layer 2 უკვე ღიაა ამ symbol-ზე?
+            # Layer 2 პოზიციები tag-ით განვასხვავებთ: symbol = "BTC/USDT_L2"
+            sym_l2 = f"{sym}_L2"
+            existing_l2 = get_open_dca_position_for_symbol(sym_l2)
+            if existing_l2:
+                logger.debug(f"[LAYER2] ALREADY_OPEN | {sym_l2}")
+                continue
+
+            # ბალანსი საკმარისია?
+            required = quote + buffer
+            if free_usdt < required:
+                logger.warning(
+                    f"[LAYER2] INSUFFICIENT_BALANCE | {sym} "
+                    f"free={free_usdt:.2f} < required={required:.2f}"
+                )
+                continue
+
+            # Layer 2 გახსნა!
+            logger.warning(
+                f"[LAYER2] CRASH_DETECTED | {sym} "
+                f"drop={drop_from_high:.2f}% >= {drop_pct:.1f}% → opening Layer 2"
+            )
+
+            # ყიდვა
+            buy = engine.exchange.place_market_buy_by_quote(sym, quote)
+            buy_price = float(buy.get("average") or buy.get("price") or current_price)
+            buy_qty   = quote / buy_price
+
+            tp_price = round(buy_price * (1.0 + tp_pct / 100.0), 6)
+
+            # dca_positions — sym_l2 tag-ით
+            pos_id = open_dca_position(
+                symbol=sym_l2,
+                initial_entry_price=buy_price,
+                initial_qty=buy_qty,
+                initial_quote_spent=quote,
+                tp_price=tp_price,
+                sl_price=0.0,
+                tp_pct=tp_pct,
+                sl_pct=999.0,
+                max_add_ons=int(os.getenv("DCA_MAX_ADD_ONS", "1")),
+                max_capital=float(os.getenv("DCA_MAX_CAPITAL_USDT", "20.0")),
+                max_drawdown_pct=999.0,
+            )
+
+            add_dca_order(
+                position_id=pos_id,
+                symbol=sym_l2,
+                order_type="LAYER2_INITIAL",
+                entry_price=buy_price,
+                qty=buy_qty,
+                quote_spent=quote,
+                avg_entry_after=buy_price,
+                tp_after=tp_price,
+                sl_after=0.0,
+                trigger_drawdown_pct=drop_from_high,
+                exchange_order_id=str(buy.get("id", "")),
+            )
+
+            # trades ცხრილი
+            from execution.db.repository import mark_signal_id_executed
+            import uuid
+            l2_signal_id = f"L2-{sym.replace('/', '')}-{uuid.uuid4().hex[:8]}"
+            open_trade(
+                signal_id=l2_signal_id,
+                symbol=sym_l2,
+                qty=buy_qty,
+                quote_in=quote,
+                entry_price=buy_price,
+            )
+
+            free_usdt -= quote  # ბალანსი განახლება in-memory
+
+            try:
+                log_event(
+                    "LAYER2_OPENED",
+                    f"sym={sym_l2} entry={buy_price:.4f} "
+                    f"tp={tp_price:.4f} drop={drop_from_high:.2f}% "
+                    f"pos_id={pos_id}"
+                )
+            except Exception:
+                pass
+
+            # Telegram
+            try:
+                from execution.telegram_notifier import notify_signal_created
+                notify_signal_created(
+                    symbol=sym_l2,
+                    entry_price=buy_price,
+                    quote_amount=quote,
+                    tp_price=tp_price,
+                    sl_price=0.0,
+                    verdict="LAYER2_BUY",
+                    mode=engine.mode,
+                )
+            except Exception as _tg:
+                logger.warning(f"[LAYER2] TG_FAIL | {sym} err={_tg}")
+
+            logger.warning(
+                f"[LAYER2] OPENED | {sym_l2} entry={buy_price:.4f} "
+                f"tp={tp_price:.4f} qty={buy_qty:.6f}"
+            )
+
+        except Exception as e:
+            logger.error(f"[LAYER2] ERR | {sym} err={e}")
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(asctime)s - %(message)s')
 
@@ -513,6 +700,16 @@ def main():
                     _run_dca_loop(engine, dca_mgr, tp_sl_mgr, risk_mgr)
                 except Exception as e:
                     logger.warning(f"DCA_LOOP_WARN | err={e}")
+
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # LAYER 2 — Crash detection & parallel trading
+            # HIGH-დან -5% ვარდნაზე ახალი 3 პოზიცია გაიხსნება
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            if _dca_enabled and engine.exchange is not None:
+                try:
+                    _check_and_open_layer2(engine, tp_sl_mgr)
+                except Exception as e:
+                    logger.warning(f"LAYER2_CHECK_WARN | err={e}")
 
             if generate_once is not None:
                 try:
