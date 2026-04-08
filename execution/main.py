@@ -483,6 +483,7 @@ def _check_and_open_layer2(engine, tp_sl_mgr) -> None:
         return
 
     for sym in symbols:
+        exchange_sym = sym  # Layer2: symbols სუფთაა (_L2 suffix არ აქვს)
         try:
             # current price
             current_price = float(engine.exchange.fetch_last_price(exchange_sym) or 0.0)
