@@ -8,6 +8,11 @@
 #   DCA_MAX_TOTAL_USDT=60.0
 #   DCA_MAX_DRAWDOWN_PCT=8.0
 #   MAX_OPEN_TRADES=2 (გაზიარებული ძველ ბოტთან)
+#
+# FIX: Smart Add-on — Binance ბალანსის ავტომატური შემოწმება
+#   ბალანსი >= addon_size + SMART_ADDON_BUFFER → add-on ✅
+#   ბალანსი < addon_size + SMART_ADDON_BUFFER → add-on ❌
+#   SMART_ADDON_BUFFER=5.0 (ENV-ით კონტროლი)
 # ============================================================
 from __future__ import annotations
 
@@ -34,6 +39,23 @@ def _ei(name: str, default: int) -> int:
         return default
 
 
+def _get_binance_usdt_balance() -> float:
+    """
+    Binance-დან თავისუფალი USDT ბალანსის წამოღება.
+    exchange_client-ის გამოყენებით — production-safe.
+    შეცდომაზე 0.0 დაბრუნება (fail-safe: add-on ბლოკდება).
+    """
+    try:
+        from execution.exchange_client import BinanceSpotClient
+        client = BinanceSpotClient()
+        balance = float(client.fetch_balance_free("USDT") or 0.0)
+        logger.debug(f"[SMART_ADDON] Binance USDT balance={balance:.2f}")
+        return balance
+    except Exception as e:
+        logger.warning(f"[SMART_ADDON] balance_fetch_fail | err={e} → 0.0 (add-on blocked)")
+        return 0.0
+
+
 class DCARiskManager:
     """
     Portfolio-level risk controls for DCA positions.
@@ -44,18 +66,24 @@ class DCARiskManager:
       3. per-symbol capital limit (DCA_MAX_CAPITAL_USDT)
       4. symbol-level dedup (ერთ symbol-ზე ერთი DCA position)
       5. min notional per add-on (Binance $10 minimum)
+      6. SMART: Binance real-time USDT balance check
     """
 
     def __init__(self) -> None:
-        self.max_open_positions = _ei("MAX_OPEN_TRADES",       2)
-        self.max_per_symbol     = _ef("DCA_MAX_CAPITAL_USDT",  40.0)
+        self.max_open_positions = _ei("MAX_OPEN_TRADES",       3)
+        self.max_per_symbol     = _ef("DCA_MAX_CAPITAL_USDT",  20.0)
         self.max_total_exposure = _ef("DCA_MAX_TOTAL_USDT",    60.0)
         self.max_drawdown_pct   = _ef("DCA_MAX_DRAWDOWN_PCT",  999.0)
-        self.min_notional       = _ef("DCA_MIN_NOTIONAL",      10.0)  # Binance minimum
+        self.min_notional       = _ef("DCA_MIN_NOTIONAL",      10.0)
+
+        # Smart Add-on: minimum free USDT buffer after addon
+        # addon_size + buffer უნდა იყოს ბალანსზე
+        self.smart_addon_buffer = _ef("SMART_ADDON_BUFFER",    5.0)
 
         logger.info(
             f"[DCA] DCARiskManager init | max_positions={self.max_open_positions} "
-            f"max_per_symbol={self.max_per_symbol} max_total={self.max_total_exposure}"
+            f"max_per_symbol={self.max_per_symbol} max_total={self.max_total_exposure} "
+            f"smart_addon_buffer={self.smart_addon_buffer}"
         )
 
     def can_open_position(
@@ -66,8 +94,6 @@ class DCARiskManager:
     ) -> Tuple[bool, str]:
         """
         ახალი DCA position-ის გახსნა შეიძლება?
-
-        open_positions: [{symbol, total_quote_spent, ...}, ...]
         """
         sym = str(symbol or "").upper().strip()
 
@@ -103,6 +129,8 @@ class DCARiskManager:
         """
         Add-on capital risk check.
         DCAPositionManager.should_add_on()-ს შემდეგ გამოიძახება.
+
+        FIX: Smart Add-on — Binance real-time balance check.
         """
         total_spent = float(position.get("total_quote_spent", 0.0))
 
@@ -125,6 +153,24 @@ class DCARiskManager:
         if addon_size < self.min_notional:
             return False, f"ADDON_BELOW_MIN_NOTIONAL ({addon_size}<{self.min_notional})"
 
+        # 4. SMART: Binance real-time USDT balance check
+        # addon_size + buffer უნდა იყოს თავისუფლად
+        required = addon_size + self.smart_addon_buffer
+        free_usdt = _get_binance_usdt_balance()
+        if free_usdt < required:
+            logger.warning(
+                f"[SMART_ADDON] BLOCKED | free={free_usdt:.2f} USDT "
+                f"< required={required:.2f} (addon={addon_size:.1f} + buffer={self.smart_addon_buffer:.1f})"
+            )
+            return False, (
+                f"INSUFFICIENT_BALANCE "
+                f"(free={free_usdt:.2f}<required={required:.2f})"
+            )
+
+        logger.info(
+            f"[SMART_ADDON] OK | free={free_usdt:.2f} USDT "
+            f">= required={required:.2f} → add-on approved"
+        )
         return True, "OK"
 
     def portfolio_summary(
@@ -139,13 +185,13 @@ class DCARiskManager:
         unrealized_pnl = sum(float(p.get("unrealized_pnl", 0.0)) for p in open_positions)
 
         return {
-            "open_count":        len(open_positions),
-            "max_open":          self.max_open_positions,
-            "total_spent":       round(total_spent, 4),
-            "max_total":         self.max_total_exposure,
-            "exposure_pct":      round(total_spent / self.max_total_exposure * 100, 1) if self.max_total_exposure else 0,
-            "symbols":           symbols,
-            "unrealized_pnl":    round(unrealized_pnl, 4),
+            "open_count":     len(open_positions),
+            "max_open":       self.max_open_positions,
+            "total_spent":    round(total_spent, 4),
+            "max_total":      self.max_total_exposure,
+            "exposure_pct":   round(total_spent / self.max_total_exposure * 100, 1) if self.max_total_exposure else 0,
+            "symbols":        symbols,
+            "unrealized_pnl": round(unrealized_pnl, 4),
         }
 
 
