@@ -716,25 +716,33 @@ def _check_cascade_exchange(engine, tp_sl_mgr) -> None:
 
             # ყველაზე ძველი Layer — opened_at მიხედვით
             oldest = sorted(sym_positions, key=lambda p: str(p.get("opened_at", "")))[0]
-            oldest_avg = float(oldest.get("avg_entry_price", 0.0))
-            oldest_qty = float(oldest.get("total_qty", 0.0))
+            oldest_avg   = float(oldest.get("avg_entry_price", 0.0))
+            oldest_qty   = float(oldest.get("total_qty", 0.0))
             oldest_quote = float(oldest.get("total_quote_spent", 0.0))
-            oldest_id = oldest["id"]
-            oldest_sym = oldest["symbol"]
+            oldest_id    = oldest["id"]
+            oldest_sym   = oldest["symbol"]
 
             if oldest_avg <= 0 or oldest_qty <= 0:
                 continue
 
-            # ვარდნა ძველი avg-დან
-            drop_from_oldest = (oldest_avg - current_price) / oldest_avg * 100.0
+            # FIX: trigger ვზომავთ ყველაზე ახალი Layer-ის avg-დან
+            # ანუ: Layer 2 გახსნიდან კიდევ -1.5% → CASCADE იწყება
+            # (არა oldest-იდან — ის Layer 2-ის trigger-თან ემთხვეოდა)
+            newest = sorted(sym_positions, key=lambda p: str(p.get("opened_at", "")))[-1]
+            newest_avg = float(newest.get("avg_entry_price", 0.0))
+            if newest_avg <= 0:
+                newest_avg = oldest_avg
+
+            drop_from_newest = (newest_avg - current_price) / newest_avg * 100.0
 
             logger.info(
                 f"[CASCADE] {sym} | oldest={oldest_sym} avg={oldest_avg:.4f} "
-                f"price={current_price:.4f} drop={drop_from_oldest:.2f}% trigger={drop_pct:.1f}%"
+                f"newest_avg={newest_avg:.4f} price={current_price:.4f} "
+                f"drop_from_newest={drop_from_newest:.2f}% trigger={drop_pct:.1f}%"
             )
 
-            if drop_from_oldest < drop_pct:
-                logger.debug(f"[CASCADE] {sym} | drop={drop_from_oldest:.2f}% < {drop_pct:.1f}% → wait")
+            if drop_from_newest < drop_pct:
+                logger.debug(f"[CASCADE] {sym} | drop={drop_from_newest:.2f}% < {drop_pct:.1f}% → wait")
                 continue
 
             # ბალანსი შემოწმება (buffer საჭიროა)
@@ -746,7 +754,7 @@ def _check_cascade_exchange(engine, tp_sl_mgr) -> None:
             # ── Exchange: ძველი Layer-ის გაყიდვა ──────────────────────
             logger.warning(
                 f"[CASCADE] EXCHANGE | {oldest_sym} avg={oldest_avg:.4f} "
-                f"qty={oldest_qty:.6f} drop={drop_from_oldest:.2f}%"
+                f"qty={oldest_qty:.6f} drop={drop_from_newest:.2f}%"
             )
 
             try:
@@ -819,7 +827,7 @@ def _check_cascade_exchange(engine, tp_sl_mgr) -> None:
                     avg_entry_after=buy_price,
                     tp_after=tp_price,
                     sl_after=0.0,
-                    trigger_drawdown_pct=drop_from_oldest,
+                    trigger_drawdown_pct=drop_from_newest,
                     exchange_order_id=str(buy.get("id", "")),
                 )
 
