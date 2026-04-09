@@ -775,8 +775,22 @@ def _check_cascade_exchange(engine, tp_sl_mgr) -> None:
 
                 # trades დახურვა
                 open_tr = get_open_trade_for_symbol(oldest_sym)
+                if not open_tr:
+                    # fallback: suffix-ის გარეშე ვეძებთ (BTC/USDT_L2 → BTC/USDT)
+                    open_tr = get_open_trade_for_symbol(exchange_sym)
+                if not open_tr:
+                    # fallback2: base symbol-ის ყველა ვარიანტი
+                    base = exchange_sym.replace("/USDT", "")
+                    for suffix in ["", "_L2", "_L3", "_L4", "_L5"]:
+                        _tr = get_open_trade_for_symbol(f"{base}/USDT{suffix}")
+                        if _tr:
+                            open_tr = _tr
+                            break
                 if open_tr:
                     close_trade(open_tr[0], sell_price, "CASCADE_EXCHANGE", pnl_quote, pnl_pct)
+                    logger.info(f"[CASCADE] TRADE_CLOSED | {oldest_sym} signal_id={open_tr[0]}")
+                else:
+                    logger.warning(f"[CASCADE] TRADE_NOT_FOUND | {oldest_sym} → DB may be out of sync")
 
                 logger.warning(
                     f"[CASCADE] SOLD | {oldest_sym} price={sell_price:.4f} "
