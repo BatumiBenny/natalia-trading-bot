@@ -462,93 +462,54 @@ def check_performance(rep: Report, conn: sqlite3.Connection):
 # check_type: "eq" | "gt" | "gte" | "lt" | "range" | "bool" | "nonempty"
 ENV_RULES: List[Tuple] = [
     # ─── Core mode ───────────────────────────────────────────────
-    ("MODE",                   "LIVE",       "eq",     "CRITICAL", "bot production mode"),
-    ("KILL_SWITCH",            "false",      "eq",     "CRITICAL", "kill switch off"),
-    ("ALLOW_LIVE_SIGNALS",     "true",       "eq",     "CRITICAL", "signals enabled"),
-    ("LIVE_CONFIRMATION",      "true",       "eq",     "WARN",     "live confirmation"),
+    ("MODE",                   "LIVE",       "eq",      "CRITICAL", "bot production mode"),
+    ("KILL_SWITCH",            "false",      "eq",      "CRITICAL", "kill switch off"),
+    ("LIVE_CONFIRMATION",      "true",       "eq",      "WARN",     "live confirmation"),
     # ─── API ─────────────────────────────────────────────────────
-    ("BINANCE_API_KEY",        None,         "nonempty","CRITICAL","Binance API key"),
-    ("BINANCE_API_SECRET",     None,         "nonempty","CRITICAL","Binance API secret"),
+    ("BINANCE_API_KEY",        None,         "nonempty","CRITICAL", "Binance API key"),
+    ("BINANCE_API_SECRET",     None,         "nonempty","CRITICAL", "Binance API secret"),
     # ─── Symbols ─────────────────────────────────────────────────
-    ("BOT_SYMBOLS",            None,         "nonempty","CRITICAL","trading symbols"),
-    ("BOT_TIMEFRAME",          "15m",        "eq",     "WARN",     "candle timeframe"),
-    ("BOT_CANDLE_LIMIT",       "300",        "eq",     "WARN",     "candle history"),
+    ("BOT_SYMBOLS",            None,         "nonempty","CRITICAL", "trading symbols"),
+    ("BOT_TIMEFRAME",          "15m",        "eq",      "WARN",     "candle timeframe"),
+    ("BOT_CANDLE_LIMIT",       "50",         "eq",      "WARN",     "candle history (DCA=50)"),
+    # ─── DCA სტრატეგია ───────────────────────────────────────────
+    ("DCA_ENABLED",            "true",       "eq",      "CRITICAL", "DCA სტრატეგია ჩართული"),
+    ("DCA_TP_PCT",             "0.55",       "eq",      "WARN",     "DCA Take Profit % (L1-L2)"),
+    ("DCA_SL_PCT",             "999.0",      "eq",      "CRITICAL", "DCA Stop Loss გათიშული (ფილოსოფია)"),
+    ("DCA_MAX_ADD_ONS",        "1",          "eq",      "WARN",     "DCA მაქსიმალური add-on"),
+    ("DCA_MAX_CAPITAL_USDT",   "40",         "eq",      "WARN",     "DCA მაქსიმალური კაპიტალი"),
+    ("DCA_ADDON_TRIGGER_PCTS", "0.65",       "eq",      "WARN",     "DCA add-on trigger %"),
+    # ─── CASCADE სტრატეგია ───────────────────────────────────────
+    ("CASCADE_ENABLED",        "true",       "eq",      "CRITICAL", "CASCADE სტრატეგია ჩართული"),
+    ("CASCADE_START_LAYER",    "2",          "eq",      "WARN",     "CASCADE დაწყება L2-დან"),
+    ("CASCADE_MAX_LAYERS",     "10",         "eq",      "WARN",     "CASCADE მაქსიმალური layer"),
+    ("CASCADE_RESUME_LAYER",   "10",         "eq",      "WARN",     "CASCADE dead zone გაუქმება"),
+    ("CASCADE_DROP_PCT",       "1.5",        "eq",      "WARN",     "CASCADE drop L2-L3 (1.5%)"),
+    ("CASCADE_DROP_L4_PCT",    "2.0",        "eq",      "WARN",     "CASCADE drop L4-L7 (2.0%)"),
+    ("CASCADE_DROP_L8_PCT",    "3.0",        "eq",      "WARN",     "CASCADE drop L8-L10 (3.0%)"),
+    ("CASCADE_TP_L3_PCT",      "0.65",       "eq",      "WARN",     "CASCADE TP L3+ (0.65%)"),
+    # ─── LAYER2 სტრატეგია ────────────────────────────────────────
+    ("LAYER2_ENABLED",         "true",       "eq",      "WARN",     "LAYER2 სტრატეგია ჩართული"),
+    ("LAYER2_DROP_PCT",        "1.5",        "eq",      "WARN",     "LAYER2 crash trigger %"),
+    ("LAYER2_QUOTE",           "10.0",       "eq",      "WARN",     "LAYER2 ყიდვის ზომა USDT"),
+    # ─── Memory დაცვა ────────────────────────────────────────────
+    ("BOT_API_ENABLED",        "false",      "eq",      "WARN",     "Bot API გამორთული (memory დაცვა)"),
+    ("DASHBOARD_ENABLED",      "false",      "eq",      "WARN",     "Dashboard გამორთული (memory დაცვა)"),
+    ("QTY_SYNC_ENABLED",       "false",      "eq",      "WARN",     "QTY Sync (Standard plan-ზე ჩართე)"),
     # ─── Sizing ──────────────────────────────────────────────────
-    ("BOT_QUOTE_PER_TRADE",    "10",         "eq",     "WARN",     "quote per trade USDT"),
-    ("MAX_QUOTE_PER_TRADE",    "10",         "eq",     "WARN",     "max quote ceiling"),
-    ("DYNAMIC_SIZE_MIN",       "8",          "eq",     "WARN",     "min dynamic size"),
-    ("DYNAMIC_SIZE_MAX",       "10",         "eq",     "WARN",     "max dynamic size"),
-    # ─── Risk ────────────────────────────────────────────────────
-    ("TP_PCT",                 "1.8",        "eq",     "WARN",     "take profit %"),
-    ("SL_PCT",                 "0.80",       "eq",     "CRITICAL", "stop loss %"),
-    ("MIN_MOVE_PCT",           "0.22",       "eq",     "WARN",     "ATR min move filter"),
-    ("MIN_NET_PROFIT_PCT",     "0.35",       "eq",     "WARN",     "net profit gate"),
-    ("ESTIMATED_ROUNDTRIP_FEE_PCT","0.14",   "eq",     "WARN",     "fee estimate"),
-    ("ESTIMATED_SLIPPAGE_PCT", "0.05",       "eq",     "WARN",     "slippage estimate"),
-    ("MAX_ACCOUNT_DRAWDOWN",   "7",          "gte",    "WARN",     "account drawdown limit %"),
-    ("MAX_DAILY_LOSS",         "3.0",        "gte",    "WARN",     "daily loss limit %"),
-    # ─── Filters ─────────────────────────────────────────────────
-    ("USE_RSI_FILTER",         "true",       "eq",     "WARN",     "RSI filter"),
-    ("RSI_MIN",                "35",         "eq",     "WARN",     "RSI buy zone min"),
-    ("RSI_MAX",                "65",         "eq",     "WARN",     "RSI buy zone max"),
-    ("RSI_SELL_MIN",           "72",         "eq",     "WARN",     "RSI sell trigger"),
-    ("USE_MACD_FILTER",        "true",       "eq",     "WARN",     "MACD filter"),
-    ("MACD_SMART_MODE",        "true",       "eq",     "WARN",     "MACD smart mode"),
-    ("MACD_IMPROVING_BARS",    "4",          "eq",     "WARN",     "MACD improving bars"),
-    ("MACD_HIST_ATR_FACTOR",   "0.2",        "eq",     "WARN",     "MACD ATR factor"),
-    ("USE_MTF_FILTER",         "true",       "eq",     "WARN",     "multi-timeframe filter"),
-    ("MTF_TIMEFRAME",          "1h",         "eq",     "WARN",     "HTF timeframe"),
-    ("USE_ADX_FILTER",         "true",       "eq",     "WARN",     "ADX filter"),
-    ("ADX_MIN_THRESHOLD",      "21",         "eq",     "WARN",     "ADX threshold"),
-    ("USE_VWAP_FILTER",        "true",       "eq",     "WARN",     "VWAP filter"),
-    ("VWAP_TOLERANCE",         "0.006",      "eq",     "WARN",     "VWAP tolerance"),
-    ("USE_TIME_FILTER",        "true",       "eq",     "WARN",     "time-of-day filter"),
-    ("TRADE_HOUR_START_UTC",   "7",          "eq",     "WARN",     "trade start hour UTC"),
-    ("TRADE_HOUR_END_UTC",     "22",         "eq",     "WARN",     "trade end hour UTC"),
-    ("USE_FUNDING_FILTER",     "true",       "eq",     "WARN",     "funding rate filter"),
-    ("FUNDING_MAX_LONG_PCT",   "0.10",       "eq",     "WARN",     "max funding for longs"),
-    ("USE_MA_FILTERS",         "false",      "eq",     "WARN",     "MA filters (off=soft mode)"),
-    ("MIN_VOLUME_24H",         "30000000",   "eq",     "WARN",     "24h volume minimum USDT"),
-    ("AI_FILTER_LOW_CONFIDENCE","true",      "eq",     "WARN",     "AI pre-filter"),
-    ("AI_CONFIDENCE_BOOST",    "1.05",       "eq",     "WARN",     "AI score boost"),
-    ("BUY_CONFIDENCE_MIN",     "0.46",       "eq",     "WARN",     "min confidence for BUY"),
-    ("BUY_LIQUIDITY_MIN_SCORE","0.40",       "eq",     "WARN",     "min liquidity score"),
-    # ─── SL Cooldown ─────────────────────────────────────────────
-    ("SL_COOLDOWN_AFTER_N",    "4",          "eq",     "WARN",     "SL cooldown trigger count"),
-    ("SL_COOLDOWN_PAUSE_SECONDS","1800",     "eq",     "WARN",     "SL cooldown pause duration"),
-    ("RECOVERY_GREEN_CANDLES", "2",          "eq",     "WARN",     "recovery green candles"),
-    ("RECOVERY_CANDLE_PCT",    "0.08",       "eq",     "WARN",     "recovery candle size %"),
-    # ─── Features ────────────────────────────────────────────────
-    ("USE_PARTIAL_TP",         "true",       "eq",     "WARN",     "partial TP"),
-    ("PARTIAL_TP1_PCT",        "1.0",        "eq",     "WARN",     "partial TP1 level %"),
-    ("PARTIAL_TP1_SIZE",       "0.5",        "eq",     "WARN",     "partial TP1 size fraction"),
-    ("USE_BREAKEVEN_STOP",     "true",       "eq",     "WARN",     "breakeven stop"),
-    ("BREAKEVEN_TRIGGER_PCT",  "0.48",       "eq",     "WARN",     "breakeven trigger %"),
-    ("TRAILING_STOP_ENABLED",  "true",       "eq",     "WARN",     "trailing stop"),
-    ("TRAILING_STOP_DISTANCE", "0.25",       "eq",     "WARN",     "trailing distance %"),
-    ("USE_DYNAMIC_SIZING",     "true",       "eq",     "WARN",     "dynamic sizing"),
-    ("DYNAMIC_SIZE_AI_LOW",    "0.55",       "eq",     "WARN",     "dynamic size AI low threshold"),
-    ("DYNAMIC_SIZE_AI_HIGH",   "0.80",       "eq",     "WARN",     "dynamic size AI high threshold"),
-    # ─── Regime / ATR ────────────────────────────────────────────
-    ("ATR_TO_TP_SANITY_FACTOR","0.08",       "eq",     "WARN",     "ATR sanity factor"),
-    ("ATR_MULT_SL_BULL",       "2.0",        "eq",     "WARN",     "ATR SL multiplier bull"),
-    ("ATR_MULT_TP_BULL",       "4.5",        "eq",     "WARN",     "ATR TP multiplier bull"),
-    ("STRUCT_SOFT_MIN_TREND",  "0.25",       "eq",     "WARN",     "soft struct trend min"),
-    ("STRUCT_SOFT_MIN_MA_GAP", "0.10",       "eq",     "WARN",     "soft struct MA gap min"),
-    ("STRUCT_SOFT_MIN_MOM10",  "-0.02",      "eq",     "WARN",     "soft struct momentum min"),
-    ("STRUCT_SOFT_REQUIRE_LAST_UP","1",      "eq",     "WARN",     "soft struct require last up"),
-    ("STRUCT_SOFT_OVERRIDE",   "true",       "eq",     "WARN",     "soft struct override"),
-    # ─── Paths / Telegram ────────────────────────────────────────
-    ("DB_PATH",                None,         "nonempty","CRITICAL","DB path"),
-    ("SIGNAL_OUTBOX_PATH",     None,         "nonempty","WARN",    "signal outbox path"),
-    ("TELEGRAM_BOT_TOKEN",     None,         "nonempty","WARN",    "Telegram bot token"),
-    ("TELEGRAM_CHAT_ID",       None,         "nonempty","WARN",    "Telegram chat ID"),
+    ("BOT_QUOTE_PER_TRADE",    "10",         "eq",      "WARN",     "quote per trade USDT"),
+    ("MAX_QUOTE_PER_TRADE",    "10",         "eq",      "WARN",     "max quote ceiling"),
     # ─── Trade limits ────────────────────────────────────────────
-    ("MAX_TRADES_PER_DAY",     "10",         "eq",     "WARN",     "max trades per day"),
-    ("MAX_TRADES_PER_HOUR",    "3",          "eq",     "WARN",     "max trades per hour"),
-    ("MAX_OPEN_TRADES",        "2",          "eq",     "WARN",     "max concurrent open trades"),
-    ("SIGNAL_EXPIRATION_SECONDS","600",      "eq",     "WARN",     "signal expiry seconds"),
-    ("BOT_SIGNAL_COOLDOWN_SECONDS","120",    "eq",     "WARN",     "signal cooldown seconds"),
+    ("MAX_OPEN_TRADES",        "7",          "eq",      "WARN",     "მაქსიმალური ღია პოზიციები"),
+    ("MIN_OPEN_TRADES",        "5",          "eq",      "WARN",     "მინიმალური ღია პოზიციები"),
+    ("SMART_ADDON_BUFFER",     "5",          "eq",      "WARN",     "USDT buffer add-on-ისთვის"),
+    ("LOOP_SLEEP_SECONDS",     "120",        "eq",      "WARN",     "loop ინტერვალი წამებში"),
+    # ─── Paths / Telegram ────────────────────────────────────────
+    ("DB_PATH",                None,         "nonempty","CRITICAL", "DB path"),
+    ("SIGNAL_OUTBOX_PATH",     None,         "nonempty","WARN",     "signal outbox path"),
+    ("TELEGRAM_BOT_TOKEN",     None,         "nonempty","WARN",     "Telegram bot token"),
+    ("TELEGRAM_CHAT_ID",       None,         "nonempty","WARN",     "Telegram chat ID"),
+    ("TELEGRAM_NOTIFICATIONS", "true",       "eq",      "WARN",     "Telegram შეტყობინებები"),
 ]
 
 
@@ -1234,6 +1195,111 @@ def check_edge_cases(rep: Report, trade: Dict):
 # MASTER RUN — სრული system diagnostics (no adapter needed)
 # =============================================================================
 
+def check_dca_positions(rep: Report, conn: sqlite3.Connection):
+    """
+    DCA-სპეციფიური შემოწმებები:
+    1. TP > avg_entry ყოველ პოზიციაზე
+    2. qty × price > $5 (minimum notional)
+    3. SL_PCT >= 999 (DCA ფილოსოფია)
+    4. CASCADE layer drop_pct by layer
+    5. Memory check
+    6. BOT_API/DASHBOARD გამორთული
+    """
+    # ── 1. TP > avg_entry ────────────────────────────────────────
+    try:
+        rows = conn.execute("""
+            SELECT symbol, avg_entry_price, current_tp_price, total_qty
+            FROM dca_positions WHERE status='OPEN'
+        """).fetchall()
+
+        for row in rows:
+            sym, avg, tp, qty = row
+            avg  = float(avg  or 0)
+            tp   = float(tp   or 0)
+            qty  = float(qty  or 0)
+
+            # TP > avg_entry
+            if avg > 0 and tp > 0:
+                ok = tp > avg
+                pct = round((tp - avg) / avg * 100, 3) if avg > 0 else 0
+                rep.add(
+                    f"DCA/tp_valid/{sym}", ok,
+                    f"TP={tp:.4f} > avg={avg:.4f} (+{pct}%)" if ok
+                    else f"TP={tp:.4f} <= avg={avg:.4f} — TP გასწორება საჭიროა!",
+                    severity="CRITICAL" if not ok else "INFO",
+                    fix=f"Shell: UPDATE dca_positions SET current_tp_price=round({avg}*1.0055,6) WHERE symbol='{sym}' AND status='OPEN';" if not ok else ""
+                )
+
+            # qty × price > $5
+            value = qty * avg
+            ok_val = value >= 5.0
+            rep.add(
+                f"DCA/qty_notional/{sym}", ok_val,
+                f"qty={qty:.8f} × avg={avg:.2f} = ${value:.2f}" + (" ✅" if ok_val else " ⚠️ < $5!"),
+                severity="CRITICAL" if not ok_val else "INFO",
+                fix=f"Shell: qty_fix საჭიროა — {sym} value=${value:.2f} < $5" if not ok_val else ""
+            )
+
+    except Exception as e:
+        rep.add("DCA/positions_check", False, f"ERROR: {e}", severity="WARN")
+
+    # ── 2. SL_PCT >= 999 ─────────────────────────────────────────
+    sl_pct = float(os.getenv("DCA_SL_PCT", "0"))
+    ok = sl_pct >= 999.0
+    rep.add(
+        "DCA/sl_philosophy", ok,
+        f"DCA_SL_PCT={sl_pct} — {'SL გათიშულია ✅' if ok else 'SL ჩართულია! DCA ფილოსოფია ირღვევა!'}",
+        severity="CRITICAL" if not ok else "INFO",
+        fix="Render ENV → DCA_SL_PCT=999.0" if not ok else ""
+    )
+
+    # ── 3. CASCADE layer drop_pct ────────────────────────────────
+    drop_base = float(os.getenv("CASCADE_DROP_PCT",    "0"))
+    drop_l4   = float(os.getenv("CASCADE_DROP_L4_PCT", "0"))
+    drop_l8   = float(os.getenv("CASCADE_DROP_L8_PCT", "0"))
+    tp_l3     = float(os.getenv("CASCADE_TP_L3_PCT",   "0"))
+
+    for val, expected, name, fix_key in [
+        (drop_base, 1.5, "CASCADE drop L2-L3", "CASCADE_DROP_PCT=1.5"),
+        (drop_l4,   2.0, "CASCADE drop L4-L7", "CASCADE_DROP_L4_PCT=2.0"),
+        (drop_l8,   3.0, "CASCADE drop L8-L10","CASCADE_DROP_L8_PCT=3.0"),
+        (tp_l3,     0.65,"CASCADE TP L3+",     "CASCADE_TP_L3_PCT=0.65"),
+    ]:
+        ok = abs(val - expected) < 0.001
+        rep.add(
+            f"DCA/cascade/{fix_key.split('=')[0]}", ok,
+            f"{name}: {val}%" + (" ✅" if ok else f" (expected={expected}%)"),
+            severity="WARN" if not ok else "INFO",
+            fix=f"Render ENV → {fix_key}" if not ok else ""
+        )
+
+    # ── 4. Memory check ──────────────────────────────────────────
+    try:
+        import resource
+        mem_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        mem_mb = mem_kb / 1024
+        ok = mem_mb < 480
+        rep.add(
+            "DCA/memory", ok,
+            f"Memory usage: {mem_mb:.0f}MB (limit=480MB)" + (" ✅" if ok else " ⚠️ 512MB-ს უახლოვდება!"),
+            severity="WARN" if not ok else "INFO",
+            fix="BOT_API_ENABLED=false და DASHBOARD_ENABLED=false შეამოწმე" if not ok else ""
+        )
+    except Exception:
+        rep.add("DCA/memory", True, "Memory check N/A", severity="INFO")
+
+    # ── 5. BOT_API / DASHBOARD გამორთული ────────────────────────
+    for key, label in [("BOT_API_ENABLED", "Bot API"), ("DASHBOARD_ENABLED", "Dashboard")]:
+        val = os.getenv(key, "true").strip().lower()
+        ok  = val in ("false", "0")
+        rep.add(
+            f"DCA/{key}", ok,
+            f"{label}: {val}" + (" გამორთულია ✅" if ok else " ჩართულია! Memory-ს ჭამს!"),
+            severity="WARN" if not ok else "INFO",
+            fix=f"Render ENV → {key}=false" if not ok else ""
+        )
+
+
 def run_full_diagnostics(
     db_path: Optional[str] = None,
     base_path: str = "/opt/render/project/src",
@@ -1284,6 +1350,9 @@ def run_full_diagnostics(
     if conn:
         # 13. PnL consistency
         check_pnl_consistency(rep, conn)
+
+        # 16. DCA-სპეციფიური შემოწმებები
+        check_dca_positions(rep, conn)
 
     # 14. API connectivity
     check_api_connectivity(rep)
