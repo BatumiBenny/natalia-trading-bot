@@ -28,6 +28,19 @@ from typing import Optional, Dict, Any
 #             Binance არ იცნობს "_L2" suffix-ს
 #   გამოსწორება: exchange_sym გამოიყენება (suffix გარეშე)
 #   ადგილი: _run_dca_loop add-on (სტრ.379)
+#
+# FIX #9 — LAYER2 Cooldown (2026-04-12)
+#   პრობლემა: BTC/ETH/BNB ერთდროულად -1.5% → სამივეს L2 ერთ ციკლში!
+#             $30 ერთ წამში გაიხარჯებოდა
+#   გამოსწორება: _LAST_L2_TS dict (module-level) + LAYER2_COOLDOWN_SECONDS=180 (ნახევრად აგრ.)
+#   ადგილი: _check_and_open_layer2() for loop-ის დასაწყისი
+#
+# FIX #10 — CASCADE buy_quote max() გაუქმება (2026-04-12)
+#   პრობლემა: buy_quote = max(net_proceeds, 10.0)
+#             net_proceeds=$8.5 → $10 ხარჯავდა, $1.5 გარე ფული!
+#   გამოსწორება: buy_quote = net_proceeds პირდაპირ
+#                net_proceeds < $10 → skip (Binance minimum notional)
+#   ადგილი: _check_cascade_exchange() ახალი Layer გახსნა
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -74,6 +87,11 @@ logger = logging.getLogger("gbm")
 
 # SIGNAL_EXPIRATION_SECONDS — outbox-დან წამოღებული ძველი signal-ი → skip
 _SIGNAL_EXPIRATION_SECONDS = 0  # DCA: disabled
+
+# FIX #9 — LAYER2 Cooldown
+# პრობლემა: BTC/ETH/BNB ერთდროულად -1.5% → სამივეს L2 ერთ ციკლში!
+# გამოსწორება: per-symbol timestamp → LAYER2_COOLDOWN_SECONDS (default 180s (ნახევრად აგრ.))
+_LAST_L2_TS: dict = {}  # symbol → last L2 open timestamp
 
 
 def _bootstrap_state_if_needed() -> None:
@@ -520,8 +538,19 @@ def _check_and_open_layer2(engine, tp_sl_mgr) -> None:
         logger.warning(f"[LAYER2] balance_fetch_fail | err={_e}")
         return
 
+    # FIX #9: cooldown — per-symbol timestamp
+    cooldown_s = int(os.getenv("LAYER2_COOLDOWN_SECONDS", "180"))
+    _now_ts = time.time()
+
     for sym in symbols:
         exchange_sym = sym  # Layer2: symbols სუფთაა (_L2 suffix არ აქვს)
+
+        # FIX #9: LAYER2 COOLDOWN — ერთ ციკლში ყველა ერთდროულად არ გაიხსნება
+        if _now_ts - _LAST_L2_TS.get(sym, 0) < cooldown_s:
+            remaining = int(cooldown_s - (_now_ts - _LAST_L2_TS.get(sym, 0)))
+            logger.info(f"[LAYER2] COOLDOWN | {sym} → skip ({remaining}s remaining)")
+            continue
+
         try:
             # current price
             current_price = float(engine.exchange.fetch_last_price(exchange_sym) or 0.0)
@@ -624,6 +653,7 @@ def _check_and_open_layer2(engine, tp_sl_mgr) -> None:
             )
 
             free_usdt -= quote  # ბალანსი განახლება in-memory
+            _LAST_L2_TS[sym] = time.time()  # FIX #9: cooldown timestamp განახლება
 
             try:
                 log_event(
@@ -885,12 +915,21 @@ def _check_cascade_exchange(engine, tp_sl_mgr) -> None:
                 logger.warning(f"[CASCADE] LOW_PROCEEDS | {net_proceeds:.4f} < $5 → skip new layer")
                 continue
 
+            # FIX #10: net_proceeds პირდაპირ გამოიყენება — max() გაუქმებულია!
+            # ძველი: buy_quote = max(net_proceeds, 10.0) → net_proceeds=$8.5-ზე $1.5 ზედმეტი ხარჯი
+            # ახალი: net_proceeds < $10 → skip (Binance minimum notional)
+            if net_proceeds < 10.0:
+                logger.warning(
+                    f"[CASCADE] LOW_PROCEEDS | {net_proceeds:.4f} < $10 minimum notional → skip"
+                )
+                continue
+
             # Layer ნომერი განვსაზღვროთ
             layer_num = len(sym_positions)  # მიმდინარე + 1
             new_sym = f"{sym}_L{layer_num + 1}"
 
             try:
-                buy_quote = max(net_proceeds, 10.0)  # მინიმუმ $10
+                buy_quote = net_proceeds  # FIX #10: max() გაუქმებული — net_proceeds პირდაპირ
                 buy = engine.exchange.place_market_buy_by_quote(exchange_sym, buy_quote)
                 buy_price = float(buy.get("average") or buy.get("price") or current_price)
                 # FIX #1: buy.get("filled") — Binance-ის რეალური დაფილვილი qty (slippage-გათვლილი)
