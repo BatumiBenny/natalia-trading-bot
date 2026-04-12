@@ -1174,12 +1174,6 @@ def main():
 
     engine = ExecutionEngine()
 
-    # DCA MODE: reconcile_oco გათიშულია — OCO არ გამოიყენება
-    # try:
-    #     engine.reconcile_oco()
-    # except Exception as e:
-    #     logger.warning(f"OCO_RECONCILE_START_WARN | err={e}")
-
     generate_once = _try_import_generator()
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1220,12 +1214,6 @@ def main():
                     pass
                 time.sleep(sleep_s)
                 continue
-
-            # DCA MODE: reconcile_oco გათიშულია loop-შიც
-            # try:
-            #     engine.reconcile_oco()
-            # except Exception as e:
-            #     logger.warning(f"OCO_RECONCILE_LOOP_WARN | err={e}")
 
             # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             # FIX #14: TP_FIX — ყოველ loop-ზე TP სისწორის შემოწმება
