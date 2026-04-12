@@ -117,12 +117,10 @@ def run_tp_fix() -> dict:
         logger.error(f"[TP_FIX] ERROR | {e}")
         result["error"] = str(e)
 
-    finally:
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
+    # FIX: conn.close() ამოღებულია!
+    # thread-local connection-ს ვერ ვხურავთ — main loop-ი იყენებს
+    # get_connection() thread-local-ს აბრუნებს → close() = main loop DB error!
+    # commit() უკვე გაკეთებულია ზემოთ
 
     return result
 
