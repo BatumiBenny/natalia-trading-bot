@@ -686,7 +686,7 @@ def _check_cascade_exchange(engine, tp_sl_mgr) -> None:
     Layer-ის მიხედვით drop_pct და tp_pct იცვლება:
       L2-L3:  drop=1.5%  tp=0.55%
       L4-L7:  drop=2.0%  tp=0.65%
-      L8-L10: drop=3.0%  tp=0.65%
+      L8-L10: drop=5.0%  tp=1.00%  ← განახლებული!
       L10+:   CASCADE_MAX_LAYERS=10 → გაჩერება
 
     ENV:
@@ -694,8 +694,9 @@ def _check_cascade_exchange(engine, tp_sl_mgr) -> None:
       CASCADE_START_LAYER=2       ← L2-დან იწყება
       CASCADE_DROP_PCT=1.5        ← L2-L3 trigger
       CASCADE_DROP_L4_PCT=2.0     ← L4-L7 trigger
-      CASCADE_DROP_L8_PCT=3.0     ← L8-L10 trigger
-      CASCADE_TP_L3_PCT=0.65      ← L3+ TP პროცენტი
+      CASCADE_DROP_L8_PCT=5.0     ← L8-L10 trigger (იყო 3.0%)
+      CASCADE_TP_L3_PCT=0.65      ← L3-L7 TP პროცენტი
+      CASCADE_TP_L8_PCT=1.00      ← L8-L10 TP პროცენტი (ახალი!)
       CASCADE_MAX_LAYERS=10       ← მე-10-ზე გაჩერება
       CASCADE_RESUME_LAYER=10     ← dead zone გაუქმება
       CASCADE_SYMBOLS=BTC/USDT,BNB/USDT,ETH/USDT
@@ -719,9 +720,10 @@ def _check_cascade_exchange(engine, tp_sl_mgr) -> None:
     cascade_start  = int(os.getenv("CASCADE_START_LAYER",  "2"))
     drop_pct_base  = float(os.getenv("CASCADE_DROP_PCT",    "1.5"))  # L2-L3
     drop_pct_l4    = float(os.getenv("CASCADE_DROP_L4_PCT", "2.0"))  # L4-L7
-    drop_pct_l8    = float(os.getenv("CASCADE_DROP_L8_PCT", "3.0"))  # L8-L10
+    drop_pct_l8    = float(os.getenv("CASCADE_DROP_L8_PCT", "5.0"))  # L8-L10 (იყო 3.0%)
     tp_pct_base    = float(os.getenv("DCA_TP_PCT",          "0.55")) # L1-L2
-    tp_pct_l3      = float(os.getenv("CASCADE_TP_L3_PCT",   "0.65")) # L3-L10
+    tp_pct_l3      = float(os.getenv("CASCADE_TP_L3_PCT",   "0.65")) # L3-L7
+    tp_pct_l8      = float(os.getenv("CASCADE_TP_L8_PCT",   "1.00")) # L8-L10 (ახალი!)
     max_layers     = int(os.getenv("CASCADE_MAX_LAYERS",    "10"))
     resume_layer   = int(os.getenv("CASCADE_RESUME_LAYER",  "10"))   # dead zone გაუქმება
     symbols_raw    = os.getenv("CASCADE_SYMBOLS", "BTC/USDT,BNB/USDT,ETH/USDT")
@@ -786,7 +788,7 @@ def _check_cascade_exchange(engine, tp_sl_mgr) -> None:
             layer_num = len(sym_positions)  # მაგ: 2 = L2, 4 = L4...
 
             # ── Layer-ის მიხედვით drop_pct ─────────────────────────
-            # L2-L3: 1.5%  |  L4-L7: 2.0%  |  L8-L10: 3.0%
+            # L2-L3: 1.5%  |  L4-L7: 2.0%  |  L8-L10: 5.0%
             if layer_num >= 8:
                 drop_pct = drop_pct_l8
             elif layer_num >= 4:
@@ -795,8 +797,10 @@ def _check_cascade_exchange(engine, tp_sl_mgr) -> None:
                 drop_pct = drop_pct_base
 
             # ── Layer-ის მიხედვით tp_pct ───────────────────────────
-            # L1-L2: 0.55%  |  L3-L10: 0.65%
-            if layer_num >= 3:
+            # L1-L2: 0.55%  |  L3-L7: 0.65%  |  L8-L10: 1.00%
+            if layer_num >= 8:
+                tp_pct = tp_pct_l8
+            elif layer_num >= 3:
                 tp_pct = tp_pct_l3
             else:
                 tp_pct = tp_pct_base
