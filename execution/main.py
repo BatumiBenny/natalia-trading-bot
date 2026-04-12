@@ -881,20 +881,50 @@ def _check_cascade_exchange(engine, tp_sl_mgr) -> None:
                     f"proceeds={net_proceeds:.4f} pnl={pnl_quote:+.4f}"
                 )
 
-                # ── Telegram — CASCADE გაყიდვის შეტყობინება ──────────
+                # ── Telegram — CASCADE გაყიდვის შეტყობინება (D: გაუმჯობესებული) ──
                 try:
-                    notify_dca_closed(
-                        symbol=oldest_sym,
-                        entry_price=oldest_avg,
-                        exit_price=sell_price,
+                    from execution.telegram_notifier import notify_cascade_exchange
+                    # ახალი layer სახელი (ჯერ გამოვთვალოთ)
+                    _new_layer_name = f"{sym}_L{layer_num + 1}"
+                    notify_cascade_exchange(
+                        symbol=sym,
+                        old_avg=oldest_avg,
+                        old_layer=oldest_sym,
+                        new_avg=current_price,  # ახლანდელი ფასი = ახალი entry
+                        new_layer=_new_layer_name,
+                        sell_price=sell_price,
                         pnl_quote=pnl_quote,
-                        pnl_pct=pnl_pct,
-                        outcome="CASCADE_SELL",
-                        add_on_count=0,
-                        stats=None,
+                        drop_pct=drop_from_newest,
+                        new_tp=round(current_price * (1.0 + tp_pct / 100.0), 6),
                     )
                 except Exception as _tg_sell:
+                    # fallback — ძველი ნოტიფიკაცია
+                    try:
+                        notify_dca_closed(
+                            symbol=oldest_sym,
+                            entry_price=oldest_avg,
+                            exit_price=sell_price,
+                            pnl_quote=pnl_quote,
+                            pnl_pct=pnl_pct,
+                            outcome="CASCADE_SELL",
+                            add_on_count=0,
+                            stats=None,
+                        )
+                    except Exception:
+                        pass
                     logger.warning(f"[CASCADE] TG_SELL_FAIL | err={_tg_sell}")
+
+                # ── C: DAILY LOSS TRACKING ────────────────────────────
+                # CASCADE pnl_quote < 0 → დღის ზარალში ვამატებთ
+                if pnl_quote < 0:
+                    try:
+                        _daily_loss_total += pnl_quote
+                        logger.info(
+                            f"[DAILY_LOSS] {sym} pnl={pnl_quote:+.4f} "
+                            f"daily_total={_daily_loss_total:.4f} limit={daily_max_loss}"
+                        )
+                    except Exception:
+                        pass
 
             except Exception as _se:
                 logger.error(f"[CASCADE] SELL_FAIL | {oldest_sym} err={_se}")
@@ -991,6 +1021,46 @@ def _check_cascade_exchange(engine, tp_sl_mgr) -> None:
                     f"tp={tp_price:.4f} quote={buy_quote:.4f}"  # FIX #13
                 )
 
+                # ── F: CASCADE DEPTH WARNING — L7+ გაფრთხილება ──────────
+                new_layer_num = layer_num + 1
+                _warn_from = int(os.getenv("CASCADE_WARN_FROM_LAYER", "7"))
+                if new_layer_num >= _warn_from:
+                    try:
+                        from execution.telegram_notifier import notify_cascade_depth
+                        # ბაზრის მიმართულება ბოლო 3 layer-ის avg-დან
+                        if len(sym_positions) >= 2:
+                            _sorted = sorted(sym_positions, key=lambda p: str(p.get("opened_at", "")))
+                            _first_avg = float(_sorted[0].get("avg_entry_price", 0))
+                            _last_avg = float(_sorted[-1].get("avg_entry_price", 0))
+                            if _last_avg < _first_avg * 0.998:
+                                _trend = "down"
+                            elif _last_avg > _first_avg * 1.002:
+                                _trend = "up"
+                            else:
+                                _trend = "sideways"
+                        else:
+                            _trend = "unknown"
+
+                        # HIGH-დან ვარდნა
+                        try:
+                            _ticker = engine.price_feed.fetch_ticker(sym)
+                            _high24 = float(_ticker.get("high") or 0.0)
+                            _drop_h = ((_high24 - buy_price) / _high24 * 100.0) if _high24 > 0 else 0.0
+                        except Exception:
+                            _drop_h = drop_from_newest
+
+                        notify_cascade_depth(
+                            symbol=sym,
+                            layer_num=new_layer_num,
+                            max_layers=max_layers,
+                            drop_from_high_pct=_drop_h,
+                            current_price=buy_price,
+                            avg_entry=buy_price,
+                            price_trend=_trend,
+                        )
+                    except Exception as _cwe:
+                        logger.warning(f"[CASCADE] DEPTH_WARN_FAIL | err={_cwe}")
+
             except Exception as _be:
                 logger.error(f"[CASCADE] BUY_FAIL | {new_sym} err={_be}")
 
@@ -1076,6 +1146,22 @@ def main():
     last_report_ts = 0.0
     last_tg_report_ts = 0.0
     last_daily_summary_date = None
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # E: HEARTBEAT — ყოველ N წამს Telegram-ზე "ბოტი ცოცხალია"
+    # HEARTBEAT_INTERVAL_SECONDS=600 (default: 10 წუთი)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    heartbeat_every_s = int(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "600"))
+    last_heartbeat_ts = 0.0
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # C: DAILY LOSS LIMIT — დღიური ზარალის ჭერი
+    # DAILY_MAX_LOSS_USDT=5.0 (default: $5 = 5% of $100)
+    # თუ CASCADE ზარალი > limit → PAUSE until next day
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    daily_max_loss = float(os.getenv("DAILY_MAX_LOSS_USDT", "5.0"))
+    _daily_loss_date = ""    # რომელ დღეზე ვთვლით
+    _daily_loss_total = 0.0  # დღის ზარალი
 
     init_db()
     _bootstrap_state_if_needed()
@@ -1210,6 +1296,52 @@ def main():
                 logger.warning("KILL_SWITCH_ACTIVE | worker will not generate/pop/execute signals")
                 try:
                     log_event("WORKER_KILL_SWITCH_ACTIVE", "blocked before loop actions")
+                except Exception:
+                    pass
+                time.sleep(sleep_s)
+                continue
+
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # B: PRICE CACHE — ყოველ loop-ზე ერთხელ fetch, cache-დან კითხვა
+            # 9 API call → 3 API call (rate limit risk ↓, სიჩქარე ↑)
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            _price_cache: dict = {}
+            if engine.exchange is not None:
+                _symbols_to_cache = [s.strip() for s in os.getenv(
+                    "BOT_SYMBOLS", "BTC/USDT,BNB/USDT,ETH/USDT"
+                ).split(",") if s.strip()]
+                for _sym in _symbols_to_cache:
+                    try:
+                        _price_cache[_sym] = float(
+                            engine.exchange.fetch_last_price(_sym) or 0.0
+                        )
+                    except Exception as _pe:
+                        logger.warning(f"PRICE_CACHE_FAIL | {_sym} err={_pe}")
+                        _price_cache[_sym] = 0.0
+
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # C: DAILY LOSS — დღის reset შემოწმება
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            _today = _now_dt().date().isoformat()
+            if _today != _daily_loss_date:
+                _daily_loss_date = _today
+                _daily_loss_total = 0.0
+                logger.info(f"DAILY_LOSS_RESET | date={_today} limit={daily_max_loss}")
+
+            # DAILY LOSS LIMIT — limit-ს გადაცდა → skip ვაჭრობა
+            if daily_max_loss > 0 and _daily_loss_total <= -daily_max_loss:
+                logger.warning(
+                    f"DAILY_LOSS_LIMIT | loss={_daily_loss_total:.4f} >= limit={daily_max_loss} → skip"
+                )
+                try:
+                    from execution.telegram_notifier import send_telegram_message
+                    send_telegram_message(
+                        f"⛔ <b>DAILY LOSS LIMIT</b>\n\n"
+                        f"📉 დღის ზარალი: <code>{_daily_loss_total:.4f} USDT</code>\n"
+                        f"🛡 Limit: <code>{daily_max_loss} USDT</code>\n"
+                        f"⏸ ვაჭრობა შეჩერებულია დღეს\n"
+                        f"🕒 <code>{_now_dt().strftime('%Y-%m-%d %H:%M')}</code>"
+                    )
                 except Exception:
                     pass
                 time.sleep(sleep_s)
@@ -1382,6 +1514,33 @@ def main():
             if telegram_report_every_s > 0 and (now - last_tg_report_ts) >= telegram_report_every_s:
                 _run_performance_report_safe(send_telegram=True)
                 last_tg_report_ts = now
+
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # E: HEARTBEAT — ყოველ 10 წუთს Telegram: "ბოტი ცოცხალია"
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            if heartbeat_every_s > 0 and (now - last_heartbeat_ts) >= heartbeat_every_s:
+                try:
+                    from execution.db.repository import get_all_open_dca_positions, get_trade_stats
+                    from execution.telegram_notifier import notify_heartbeat
+                    import resource as _res
+                    _hb_positions = get_all_open_dca_positions()
+                    _hb_capital = sum(
+                        float(p.get("total_quote_spent", 0)) for p in _hb_positions
+                    )
+                    _hb_stats = get_trade_stats()
+                    _hb_pnl_today = float(_hb_stats.get("pnl_quote_sum", 0.0))
+                    _hb_mem = _res.getrusage(_res.RUSAGE_SELF).ru_maxrss / 1024
+                    notify_heartbeat(
+                        open_count=len(_hb_positions),
+                        open_capital=_hb_capital,
+                        prices=_price_cache,
+                        memory_mb=_hb_mem,
+                        pnl_today=_hb_pnl_today,
+                    )
+                    last_heartbeat_ts = now
+                except Exception as _hbe:
+                    logger.warning(f"HEARTBEAT_FAIL | err={_hbe}")
+                    last_heartbeat_ts = now
 
             try:
                 now_local = _now_dt()
