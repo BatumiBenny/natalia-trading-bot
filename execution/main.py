@@ -1520,10 +1520,27 @@ def main():
                 last_tg_report_ts = now
 
             # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # E: HEARTBEAT — ყოველ 10 წუთს Telegram: "ბოტი ცოცხალია"
             # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            if heartbeat_every_s > 0 and (now - last_heartbeat_ts) >= heartbeat_every_s:
-                try:
+            # E: HEARTBEAT — Smart Schedule (Asia/Tbilisi):
+            # 08:00-00:00 → ყოველ 30 წუთს
+            # 00:00-00:30 → ერთხელ ღამით (Daily Summary-ის შემდეგ)
+            # 00:30-08:00 → გაჩუმება 😴
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            try:
+                _hb_now    = _now_dt()
+                _hb_hour   = _hb_now.hour
+                _hb_minute = _hb_now.minute
+
+                # 00:30-08:00 → გაჩუმება
+                _hb_silent = (0 < _hb_hour < 8) or (_hb_hour == 0 and _hb_minute >= 30)
+
+                # 00:00-00:30 → ერთხელ ღამით
+                _hb_night_ok = (_hb_hour == 0 and 29 <= _hb_minute <= 31)
+
+                # 08:00-00:00 → ყოველ 30 წუთს
+                _hb_day_ok = not _hb_silent and (now - last_heartbeat_ts) >= 1800
+
+                if not _hb_silent and (_hb_night_ok or _hb_day_ok):
                     from execution.db.repository import get_all_open_dca_positions, get_trade_stats
                     from execution.telegram_notifier import notify_heartbeat
                     import resource as _res
@@ -1543,9 +1560,8 @@ def main():
                         positions=_hb_positions,
                     )
                     last_heartbeat_ts = now
-                except Exception as _hbe:
-                    logger.warning(f"HEARTBEAT_FAIL | err={_hbe}")
-                    last_heartbeat_ts = now
+            except Exception as _hbe:
+                logger.warning(f"HEARTBEAT_FAIL | err={_hbe}")
 
             try:
                 now_local = _now_dt()
