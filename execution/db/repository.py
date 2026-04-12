@@ -652,8 +652,8 @@ def get_trade_stats() -> Dict[str, Any]:
         """
         SELECT
             COUNT(*) AS closed_trades,
-            SUM(CASE WHEN pnl_quote > 0 THEN 1 ELSE 0 END) AS wins,
-            SUM(CASE WHEN pnl_quote <= 0 THEN 1 ELSE 0 END) AS losses,
+            SUM(CASE WHEN outcome IN ('TP','WIN','CASCADE_SELL') THEN 1 ELSE 0 END) AS wins,
+            SUM(CASE WHEN outcome IN ('SL','MANUAL_CLOSE','FORCE_CLOSE') THEN 1 ELSE 0 END) AS losses,
             COALESCE(SUM(pnl_quote), 0) AS pnl_quote_sum,
             COALESCE(SUM(quote_in), 0) AS quote_in_sum,
             COALESCE(SUM(CASE WHEN pnl_quote > 0 THEN pnl_quote ELSE 0 END), 0) AS gross_profit,
