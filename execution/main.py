@@ -1536,6 +1536,7 @@ def main():
                         prices=_price_cache,
                         memory_mb=_hb_mem,
                         pnl_today=_hb_pnl_today,
+                        positions=_hb_positions,
                     )
                     last_heartbeat_ts = now
                 except Exception as _hbe:
