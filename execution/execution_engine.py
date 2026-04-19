@@ -1813,7 +1813,7 @@ class ExecutionEngine:
                             _kelly_quote = max(min_notional, _kelly_quote)
                             _kelly_quote = min(
                                 _kelly_quote,
-                                float(os.getenv("MAX_QUOTE_PER_TRADE", "10"))   # ENV=10
+                                float(os.getenv("MAX_QUOTE_PER_TRADE", "12"))   # FIX #5: 10→12
                             )
                             if _kelly_quote < quote_amount:
                                 _prev = quote_amount
@@ -2011,7 +2011,7 @@ class ExecutionEngine:
                         tp_pct=_dca_tp_pct,
                         sl_pct=999.0,
                         max_add_ons=int(os.getenv("DCA_MAX_ADD_ONS", "3")),
-                        max_capital=float(os.getenv("DCA_MAX_CAPITAL_USDT", "20.0")),
+                        max_capital=float(os.getenv("DCA_MAX_CAPITAL_USDT", "24.0")),  # FIX #6: 20→24
                         max_drawdown_pct=999.0,
                     )
 
