@@ -393,6 +393,24 @@ def signal_id_already_executed(signal_id: str) -> bool:
     return row is not None
 
 
+def get_executed_signal_action(signal_id: str) -> str:
+    """
+    executed_signals ცხრილიდან action სტრიქონის წამოღება.
+
+    გამოიყენება TRADE_DEMO (ნორმალური შესრულება) vs REJECT_* (ნამდვილი reject)
+    განსასხვავებლად.
+
+    Returns:
+        action სტრიქონი (მაგ. "TRADE_DEMO", "REJECT_MAX_OPEN_TRADES") ან
+        "" თუ signal არ მოიძებნა.
+    """
+    row = _fetchone(
+        "SELECT action FROM executed_signals WHERE signal_id = ?",
+        (str(signal_id),),
+    )
+    return str(row[0]) if row else ""
+
+
 def mark_signal_id_executed(
     signal_id: str,
     signal_hash: Optional[str] = None,
