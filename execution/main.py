@@ -681,7 +681,7 @@ def _check_and_open_layer2(engine, tp_sl_mgr) -> None:
                 tp_pct=tp_pct,
                 sl_pct=999.0,
                 max_add_ons=int(os.getenv("DCA_MAX_ADD_ONS", "1")),
-                max_capital=float(os.getenv("DCA_MAX_CAPITAL_USDT", "20.0")),
+                max_capital=float(os.getenv("DCA_MAX_CAPITAL_USDT", "24.0")),  # FIX #4a: 20→24
                 max_drawdown_pct=999.0,
             )
 
@@ -793,7 +793,7 @@ def _check_cascade_exchange(engine, tp_sl_mgr) -> None:
     # ყველა ღია პოზიცია
     all_positions = get_all_open_dca_positions()
 
-    # სულ რამდენი Layer გვაქვს (Layer1 + Layer2 + _L2 + _L3 ...)
+    # სულ რამდენი Layer გვაქვს — მხოლოდ ლოგისთვის
     total_layers = len(all_positions)
 
     logger.info(
@@ -801,14 +801,13 @@ def _check_cascade_exchange(engine, tp_sl_mgr) -> None:
         f"start_at={cascade_start} max={max_layers}"
     )
 
-    # Cascade ჯერ არ დაწყებულა?
-    if total_layers < cascade_start:
-        logger.debug(f"[CASCADE] NOT_YET | {total_layers} < {cascade_start}")
-        return
+    # FIX #7: global total_layers check ამოღებულია!
+    # ძველი კოდი: total_layers=5 (BTC+ETH+BNB L1+L2) >= max_layers=3 → MAX_REACHED → CASCADE ბლოკი
+    # სწორი: per-symbol layers-ს ვამოწმებთ loop-ში (sym_positions)
+    # cascade_start/max_layers შემოწმება sym_positions-ზე ხდება ქვემოთ
 
-    # L3-ზე გაჩერება
-    if total_layers >= max_layers:
-        logger.info(f"[CASCADE] MAX_REACHED | {total_layers} >= {max_layers} → stop")
+    if not all_positions:
+        logger.debug("[CASCADE] NO_POSITIONS → skip")
         return
 
     for sym in symbols:
@@ -834,6 +833,14 @@ def _check_cascade_exchange(engine, tp_sl_mgr) -> None:
 
             if len(sym_positions) < 2:
                 logger.debug(f"[CASCADE] {sym} | only {len(sym_positions)} layer(s) → skip")
+                continue
+
+            # FIX #7: per-symbol max_layers check (ადრე global იყო → ბლოკავდა)
+            if len(sym_positions) >= max_layers:
+                logger.info(
+                    f"[CASCADE] {sym} | MAX_LAYERS_REACHED | "
+                    f"{len(sym_positions)}/{max_layers} → stop"
+                )
                 continue
 
             # ყველაზე ძველი Layer — opened_at მიხედვით
@@ -1032,7 +1039,7 @@ def _check_cascade_exchange(engine, tp_sl_mgr) -> None:
                     tp_pct=tp_pct,
                     sl_pct=999.0,
                     max_add_ons=int(os.getenv("DCA_MAX_ADD_ONS", "1")),
-                    max_capital=float(os.getenv("DCA_MAX_CAPITAL_USDT", "20.0")),
+                    max_capital=float(os.getenv("DCA_MAX_CAPITAL_USDT", "24.0")),  # FIX #4b: 20→24
                     max_drawdown_pct=999.0,
                 )
 
