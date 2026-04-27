@@ -58,9 +58,9 @@ class BinanceSpotClient:
             "secret":          api_secret,
             "enableRateLimit": True,
             "options": {
-                "defaultType":      "spot",   # Binance Spot
-                "fetchCurrencies":  False,    # ზედმეტი API call
-                "fetchTradingFees": False,    # ზედმეტი API call
+                "defaultType":      "spot",
+                "fetchCurrencies":  False,
+                "fetchTradingFees": False,
             },
         }
 
@@ -75,13 +75,100 @@ class BinanceSpotClient:
 
         self.exchange = ccxt.binance(exchange_config)
 
-        # load_markets ერთხელ startup-ზე — ccxt cache-ავს შედეგს.
-        # fetch_ohlcv-ზე load_markets-ი აღარ გამოიძახება — rate limit fix.
         try:
             self.exchange.load_markets()
             logger.info("BINANCE_LOAD_MARKETS | OK | markets cached")
         except Exception as e:
             logger.warning(f"LOAD_MARKETS_WARN | err={e}")
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # PRICE MOCK — DEMO TEST სისტემა
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Shell ბრძანებები:
+    #
+    #   გამორთვა (რეალური ფასი):
+    #     echo '{}' > /var/data/price_mock.json
+    #
+    #   -10% სცენარი:
+    #     echo '{"BTC/USDT":69300,"ETH/USDT":2088,"BNB/USDT":565}' > /var/data/price_mock.json
+    #
+    #   -20% სცენარი:
+    #     echo '{"BTC/USDT":61600,"ETH/USDT":1856,"BNB/USDT":502}' > /var/data/price_mock.json
+    #
+    #   -30% სცენარი:
+    #     echo '{"BTC/USDT":53900,"ETH/USDT":1624,"BNB/USDT":440}' > /var/data/price_mock.json
+    #
+    #   bounce (რეალური ფასი):
+    #     echo '{}' > /var/data/price_mock.json
+    #
+    # უსაფრთხოება:
+    #   - DEMO mode only — LIVE/TESTNET-ზე საერთოდ არ შედის
+    #   - hot-reload — Render restart არ სჭირდება
+    #   - suffix strip — BTC/USDT_LP, BTC/USDT_L2 ავტომატურად BTC/USDT-ზე
+    #   - high/low/bid/ask — LAYER2 და სხვა checks-ისთვის სწორი
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    _MOCK_PATH = "/var/data/price_mock.json"
+
+    def _get_mock_price(self, symbol: str) -> Optional[float]:
+        """
+        Returns mock price if:
+          1. MODE=DEMO (LIVE/TESTNET-ზე None → real price)
+          2. /var/data/price_mock.json არსებობს და {} არ არის
+          3. symbol (suffix-stripped) იპოვება JSON-ში
+
+        Returns None → caller uses real Binance price.
+        """
+        if self.mode not in ("DEMO",):
+            return None
+        try:
+            import json as _j
+            import re as _r
+            with open(self._MOCK_PATH) as _f:
+                _data = _j.load(_f)
+            if not _data:
+                return None
+            _clean = _r.sub(r'(_L\d+|_LP)$', '', str(symbol))
+            _p = _data.get(_clean)
+            if _p is not None:
+                _price = float(_p)
+                logger.debug(
+                    f"[PRICE_MOCK] {symbol} → {_clean} = {_price:.4f} "
+                    f"(mock active)"
+                )
+                return _price
+        except FileNotFoundError:
+            pass
+        except Exception as _e:
+            logger.warning(f"[PRICE_MOCK] read_fail | err={_e}")
+        return None
+
+    def _build_mock_ticker(self, price: float, symbol: str) -> Dict[str, Any]:
+        """
+        Full ccxt ticker dict from a single mock price.
+        high/low/bid/ask — LAYER2 check და სხვა callers-ისთვის.
+        """
+        return {
+            "last":   price,
+            "close":  price,
+            "bid":    round(price * 0.9999, 8),
+            "ask":    round(price * 1.0001, 8),
+            "high":   round(price * 1.005,  8),
+            "low":    round(price * 0.995,  8),
+            "open":   round(price * 1.002,  8),
+            "change": 0.0,
+            "percentage": 0.0,
+            "symbol": symbol,
+            "info": {
+                "highPrice":  str(round(price * 1.005, 8)),
+                "lowPrice":   str(round(price * 0.995, 8)),
+                "lastPrice":  str(price),
+                "bidPrice":   str(round(price * 0.9999, 8)),
+                "askPrice":   str(round(price * 1.0001, 8)),
+            },
+        }
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     def _guard(self, symbol: str, quote_amount: Optional[float] = None) -> None:
         if self.kill_switch:
@@ -96,10 +183,6 @@ class BinanceSpotClient:
             raise LiveTradingBlocked(f"quote_amount {quote_amount} exceeds MAX_QUOTE_PER_TRADE={self.max_quote_per_trade}")
 
     def _with_retry(self, fn, *args, label: str = "ORDER", **kwargs):
-        """
-        ORDER_RETRY_COUNT / ORDER_RETRY_DELAY_MS — exponential backoff.
-        NetworkError / RequestTimeout → retry. სხვა exception → immediately raise.
-        """
         delay_s  = self.order_retry_delay_ms / 1000.0
         last_err = None
         for attempt in range(1, self.order_retry_count + 1):
@@ -123,26 +206,46 @@ class BinanceSpotClient:
     def diagnostics(self) -> Dict[str, Any]:
         try:
             sym = next(iter(self.symbol_whitelist)) if self.symbol_whitelist else "BTC/USDT"
-            t = self.exchange.fetch_ticker(sym)
+            t = self.fetch_ticker(sym)
             usdt_free = self.fetch_balance_free("USDT")
+            mock_p = self._get_mock_price(sym)
             return {
                 "mode": self.mode,
                 "kill_switch": self.kill_switch,
                 "live_confirmation": self.live_confirmation,
                 "symbol_probe": sym,
                 "last_price": float(t.get("last") or 0.0),
+                "price_mock_active": mock_p is not None,
                 "usdt_free": usdt_free,
                 "ok": True,
             }
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def fetch_ticker(self, symbol: str) -> Dict[str, Any]:
+        """
+        ფასის წამოღება — mock ან Binance API.
+
+        PRICE MOCK logic (DEMO only):
+          /var/data/price_mock.json → {} = გამორთული, {"BTC/USDT": 69300} = mock
+          suffix strip: BTC/USDT_LP / BTC/USDT_L2 → BTC/USDT ავტომატურად
+        """
+        mock_price = self._get_mock_price(symbol)
+        if mock_price is not None:
+            return self._build_mock_ticker(mock_price, symbol)
+        return self.exchange.fetch_ticker(symbol)
+
     def fetch_last_price(self, symbol: str) -> float:
+        """
+        ბოლო ფასი — mock ან Binance API.
+        """
+        mock_price = self._get_mock_price(symbol)
+        if mock_price is not None:
+            return mock_price
         t = self.exchange.fetch_ticker(symbol)
         return float(t["last"])
 
     def get_min_notional(self, symbol: str) -> float:
-        """Binance Spot minimum notional for an order."""
         try:
             m = self.exchange.market(symbol)
             cost_min = (((m.get("limits") or {}).get("cost") or {}).get("min"))
@@ -153,10 +256,9 @@ class BinanceSpotClient:
                     return float(f.get("minNotional", 0.0))
         except Exception as e:
             logger.warning(f"MIN_NOTIONAL_LOOKUP_FAIL | symbol={symbol} err={e}")
-        return 10.0  # Binance Spot default $10
+        return 10.0
 
     def fetch_balance_free(self, asset: str) -> float:
-        # Binance Spot — type=spot კმარა, unified Bybit-ისთვის იყო
         try:
             bal = self.exchange.fetch_balance()
             return float((bal.get("free", {}) or {}).get(asset.upper(), 0.0) or 0.0)
@@ -170,9 +272,6 @@ class BinanceSpotClient:
     def cancel_order(self, order_id: str, symbol: str) -> Dict[str, Any]:
         return self.exchange.cancel_order(str(order_id), symbol)
 
-    # ----------------------------
-    # Precision helpers (STRING!)
-    # ----------------------------
     def floor_amount(self, symbol: str, amount: float) -> float:
         try:
             s = self.exchange.amount_to_precision(symbol, amount)
@@ -193,18 +292,9 @@ class BinanceSpotClient:
     def _price_str(self, symbol: str, price: float) -> str:
         return str(self.exchange.price_to_precision(symbol, price))
 
-    # ----------------------------
-    # Orders
-    # ----------------------------
     def place_market_buy_by_quote(self, symbol: str, quote_amount: float) -> Dict[str, Any]:
-        """
-        Bybit Spot market buy by quote (USDT).
-        Bybit ccxt-ში: create_order(..., params={"quoteOrderQty": ...}) ან
-        createMarketBuyOrderWithCost — ccxt unified method.
-        """
         self._guard(symbol, quote_amount=quote_amount)
         try:
-            # ccxt unified: cost-based market buy
             return self._with_retry(
                 self.exchange.create_order,
                 symbol, "market", "buy", None, None,
@@ -244,7 +334,6 @@ class BinanceSpotClient:
             raise ExchangeClientError(f"Limit sell failed: {e}")
 
     def place_stop_loss_limit_sell(self, symbol: str, base_amount: float, stop_price: float, limit_price: float) -> Dict[str, Any]:
-        # Binance Spot STOP_LOSS_LIMIT order
         self._guard(symbol)
         try:
             amt      = float(self.exchange.amount_to_precision(symbol, base_amount))
@@ -261,12 +350,7 @@ class BinanceSpotClient:
         except Exception as e:
             raise ExchangeClientError(f"Stop-loss-limit sell failed: {e}")
 
-
     def place_oco_sell(self, symbol: str, base_amount: float, tp_price: float, sl_stop_price: float, sl_limit_price: float) -> Dict[str, Any]:
-        """
-        Binance Spot native OCO sell order.
-        TP (Limit) + SL (Stop-Limit) ერთ OCO ბრძანებაში.
-        """
         self._guard(symbol)
         try:
             qty      = self._amount_str(symbol, base_amount)
@@ -289,7 +373,6 @@ class BinanceSpotClient:
                 },
                 label="OCO_SELL"
             )
-
             return {"raw": result}
         except Exception as e:
             raise ExchangeClientError(f"OCO sell failed: {e}")
