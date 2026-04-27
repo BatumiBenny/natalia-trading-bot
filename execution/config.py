@@ -56,7 +56,7 @@ BINANCE_LIVE_REST_BASE = _env_str("BINANCE_LIVE_REST_BASE", "https://api.binance
 # DATABASE
 # ─────────────────────────────────────────────
 
-DB_PATH = Path(_env_str("DB_PATH", "/var/data/genius_bot_v2.db"))
+DB_PATH = Path(_env_str("DB_PATH", "/var/data/genius_dca.db"))
 
 # ─────────────────────────────────────────────
 # TRADING SYMBOLS & TIMEFRAMES
