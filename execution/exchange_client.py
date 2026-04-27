@@ -81,6 +81,24 @@ class BinanceSpotClient:
         except Exception as e:
             logger.warning(f"LOAD_MARKETS_WARN | err={e}")
 
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # PRICE MOCK FILE — auto-create on startup (DEMO only)
+        # Render restart-ზე /var/data/ persistent — ფაილი რჩება.
+        # პირველი გაშვებისას ავტომატურად {} შეიქმნება.
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        if self.mode == "DEMO":
+            try:
+                import pathlib as _pl
+                _mock_file = _pl.Path(self._MOCK_PATH)
+                _mock_file.parent.mkdir(parents=True, exist_ok=True)
+                if not _mock_file.exists():
+                    _mock_file.write_text("{}")
+                    logger.info("[PRICE_MOCK] /var/data/price_mock.json created (empty)")
+                else:
+                    logger.debug("[PRICE_MOCK] /var/data/price_mock.json exists")
+            except Exception as _me:
+                logger.warning(f"[PRICE_MOCK] init_fail | err={_me}")
+
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # PRICE MOCK — DEMO TEST სისტემა
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
