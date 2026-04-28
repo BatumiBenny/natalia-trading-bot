@@ -134,7 +134,12 @@ class ExecutionEngine:
         # DEMO only — LIVE/TESTNET-ზე price_feed ხელუხლებელია.
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         if self.mode == "DEMO":
-            _orig_feed = self.price_feed
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # FIX: _orig_fetch = method reference (not object)
+            # object reference → infinite recursion after monkey-patch
+            # method reference → original ccxt.fetch_ticker preserved
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            _orig_fetch = self.price_feed.fetch_ticker  # ← method, not object
             _MOCK_PATH = "/var/data/price_mock.json"
 
             try:
@@ -172,7 +177,7 @@ class ExecutionEngine:
                     pass
                 except Exception as _e:
                     logger.warning(f"[PRICE_MOCK] engine_read_fail | err={_e}")
-                return _orig_feed.fetch_ticker(symbol, params)
+                return _orig_fetch(symbol, params)  # ← method call, no recursion
 
             self.price_feed.fetch_ticker = _mock_fetch_ticker
 
