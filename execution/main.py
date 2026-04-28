@@ -443,7 +443,7 @@ def _run_dca_loop(engine, dca_mgr, tp_sl_mgr, risk_mgr,
 
         # FIX #20: (_L\d+|_LP)$ — LP suffix-ის სწორი strip
         import re as _re_sym
-        exchange_sym = _re_sym.sub(r'(_L\d+|_LP)$', '', sym)
+        exchange_sym = _re_sym.sub(r'(_L\d+|_LP\d*)$', '', sym)
 
         try:
             # current price — DEMO: price_feed, LIVE: exchange
@@ -834,7 +834,7 @@ def _execute_l3_addon(engine, pos: dict, current_price: float, tp_sl_mgr) -> Non
 
     # FIX #20: (_L\d+|_LP)$ regex
     import re as _re_l3
-    exchange_sym = _re_l3.sub(r'(_L\d+|_LP)$', '', sym)
+    exchange_sym = _re_l3.sub(r'(_L\d+|_LP\d*)$', '', sym)
 
     try:
         l3_addon_quote = float(os.getenv("BOT_QUOTE_PER_TRADE", "12.0"))
@@ -943,7 +943,7 @@ def _execute_l3_rotation(engine, pos: dict, current_price: float, tp_sl_mgr, dca
 
     # FIX #20: (_L\d+|_LP)$ regex
     import re as _re_rot
-    exchange_sym = _re_rot.sub(r'(_L\d+|_LP)$', '', sym)
+    exchange_sym = _re_rot.sub(r'(_L\d+|_LP\d*)$', '', sym)
 
     try:
         dca_orders = get_dca_orders(pos_id)
@@ -1325,6 +1325,220 @@ def _open_lp_position(
 
     except Exception as e:
         logger.error(f"[LP] LIVE_MARKET_FAIL | {lp_sym} err={e}")
+
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# PHANTOM OS — 5-Level L-Phantom სისტემა (FIX #23)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# LP1 @ L1 x (1-1.0%) _LP1 | LP2 @ L1 x (1-2.0%) _LP2
+# LP3 @ L1 x (1-3.5%) _LP3 | LP4 @ L1 x (1-5.0%) _LP4
+# LP5 @ L1 x (1-6.0%) _LP5
+# ENV: PHANTOM_ENABLED, PHANTOM_LEVELS, PHANTOM_QUOTES
+# PHANTOM_ENABLED=true -> PHANTOM იმუშავებს, LP_ENABLED იგნორდება
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def _open_phantom_level(
+    engine,
+    base_sym: str,
+    l1_price: float,
+    level_idx: int,
+    drop_pct: float,
+    quote: float,
+    signal_id: str,
+    tp_pct: float,
+    max_add_ons: int,
+    max_capital: float,
+) -> None:
+    """ერთი Phantom level-ის გახსნა. DEMO: ვირტუალური. LIVE: market order."""
+    from execution.db.repository import (
+        open_dca_position, add_dca_order, open_trade,
+        get_open_dca_position_for_symbol, log_event,
+    )
+    ph_sym = f"{base_sym}_LP{level_idx}"
+    target_price = round(l1_price * (1.0 - drop_pct / 100.0), 8)
+
+    if get_open_dca_position_for_symbol(ph_sym):
+        logger.debug(f"[PHANTOM] ALREADY_OPEN | {ph_sym} -> skip")
+        return
+
+    is_live = engine.exchange is not None
+
+    if not is_live:
+        buy_price = target_price
+        buy_qty   = quote / buy_price if buy_price > 0 else 0.0
+        if buy_qty <= 0:
+            return
+        tp_price = round(buy_price * (1.0 + tp_pct / 100.0), 6)
+        pos_id = open_dca_position(
+            symbol=ph_sym, initial_entry_price=buy_price,
+            initial_qty=buy_qty, initial_quote_spent=quote,
+            tp_price=tp_price, sl_price=0.0, tp_pct=tp_pct, sl_pct=999.0,
+            max_add_ons=max_add_ons, max_capital=max_capital, max_drawdown_pct=999.0,
+        )
+        add_dca_order(
+            position_id=pos_id, symbol=ph_sym,
+            order_type=f"PHANTOM_L{level_idx}_INITIAL",
+            entry_price=buy_price, qty=buy_qty, quote_spent=quote,
+            avg_entry_after=buy_price, tp_after=tp_price, sl_after=0.0,
+            trigger_drawdown_pct=drop_pct,
+            exchange_order_id=f"PH{level_idx}-{signal_id}",
+        )
+        open_trade(
+            signal_id=f"PH{level_idx}-{signal_id}", symbol=ph_sym,
+            qty=buy_qty, quote_in=quote, entry_price=buy_price,
+        )
+        logger.warning(
+            f"[PHANTOM] DEMO_OPENED | {ph_sym} "
+            f"entry={buy_price:.4f} (L1={l1_price:.4f} -{drop_pct}%) "
+            f"tp={tp_price:.4f} quote={quote}"
+        )
+        try:
+            log_event("PHANTOM_OPENED_DEMO",
+                f"sym={ph_sym} level={level_idx} entry={buy_price:.4f} "
+                f"tp={tp_price:.4f} drop={drop_pct}%")
+        except Exception:
+            pass
+        try:
+            from execution.telegram_notifier import notify_signal_created
+            notify_signal_created(symbol=ph_sym, entry_price=buy_price,
+                quote_amount=quote, tp_price=tp_price, sl_price=0.0,
+                verdict=f"PHANTOM_L{level_idx}", mode="DEMO")
+        except Exception as _tg:
+            logger.warning(f"[PHANTOM] TG_FAIL | {ph_sym} err={_tg}")
+        return
+
+    try:
+        buy = engine.exchange.place_market_buy_by_quote(base_sym, quote)
+        buy_price = float(buy.get("average") or buy.get("price") or l1_price)
+        buy_qty   = float(buy.get("filled") or buy.get("amount") or (quote / buy_price))
+        tp_price  = round(buy_price * (1.0 + tp_pct / 100.0), 6)
+        pos_id = open_dca_position(
+            symbol=ph_sym, initial_entry_price=buy_price,
+            initial_qty=buy_qty, initial_quote_spent=quote,
+            tp_price=tp_price, sl_price=0.0, tp_pct=tp_pct, sl_pct=999.0,
+            max_add_ons=max_add_ons, max_capital=max_capital, max_drawdown_pct=999.0,
+        )
+        add_dca_order(
+            position_id=pos_id, symbol=ph_sym,
+            order_type=f"PHANTOM_L{level_idx}_INITIAL",
+            entry_price=buy_price, qty=buy_qty, quote_spent=quote,
+            avg_entry_after=buy_price, tp_after=tp_price, sl_after=0.0,
+            trigger_drawdown_pct=abs(buy_price - l1_price) / l1_price * 100.0 if l1_price > 0 else 0.0,
+            exchange_order_id=str(buy.get("id", "")),
+        )
+        open_trade(signal_id=f"PH{level_idx}-{signal_id}", symbol=ph_sym,
+            qty=buy_qty, quote_in=quote, entry_price=buy_price)
+        logger.warning(
+            f"[PHANTOM] LIVE_OPENED | {ph_sym} "
+            f"entry={buy_price:.4f} tp={tp_price:.4f} quote={quote}"
+        )
+        try:
+            log_event("PHANTOM_OPENED_LIVE",
+                f"sym={ph_sym} level={level_idx} entry={buy_price:.4f} tp={tp_price:.4f}")
+        except Exception:
+            pass
+        try:
+            from execution.telegram_notifier import notify_signal_created
+            notify_signal_created(symbol=ph_sym, entry_price=buy_price,
+                quote_amount=quote, tp_price=tp_price, sl_price=0.0,
+                verdict=f"PHANTOM_L{level_idx}", mode="LIVE")
+        except Exception as _tg:
+            logger.warning(f"[PHANTOM] TG_FAIL | {ph_sym} err={_tg}")
+    except Exception as e:
+        logger.error(f"[PHANTOM] LIVE_OPEN_FAIL | {ph_sym} err={e}")
+
+
+def _check_and_open_phantom(engine, tp_pct: float, max_add_ons: int, max_capital: float) -> None:
+    """
+    PHANTOM OS loop check — ყოველ main loop-ზე.
+    Price-triggered: current <= L1_avg x (1 - drop%) -> open LP{n}.
+    """
+    if os.getenv("PHANTOM_ENABLED", "false").strip().lower() not in ("1", "true", "yes"):
+        return
+
+    from execution.db.repository import (
+        get_all_open_dca_positions, get_open_dca_position_for_symbol,
+    )
+    import uuid as _uuid_ph
+
+    try:
+        levels = [float(x.strip()) for x in
+                  os.getenv("PHANTOM_LEVELS", "1.0,2.0,3.5,5.0,6.0").split(",") if x.strip()]
+    except Exception:
+        levels = [1.0, 2.0, 3.5, 5.0, 6.0]
+    try:
+        quotes = [float(x.strip()) for x in
+                  os.getenv("PHANTOM_QUOTES", "50,50,50,50,50").split(",") if x.strip()]
+    except Exception:
+        quotes = [50.0] * len(levels)
+    while len(quotes) < len(levels):
+        quotes.append(quotes[-1] if quotes else 50.0)
+
+    base_symbols = [s.strip() for s in
+                    os.getenv("BOT_SYMBOLS", "BTC/USDT,ETH/USDT,BNB/USDT").split(",") if s.strip()]
+
+    try:
+        all_open = get_all_open_dca_positions() or []
+    except Exception as _e:
+        logger.warning(f"[PHANTOM] DB_FAIL | err={_e}")
+        return
+
+    for base_sym in base_symbols:
+        try:
+            l1_pos = next((p for p in all_open if str(p.get("symbol", "")) == base_sym), None)
+            if not l1_pos:
+                logger.debug(f"[PHANTOM] NO_L1 | {base_sym} -> skip")
+                continue
+
+            l1_avg = float(l1_pos.get("avg_entry_price") or 0.0)
+            if l1_avg <= 0:
+                continue
+
+            try:
+                if engine.exchange is not None:
+                    current_price = float(engine.exchange.fetch_last_price(base_sym) or 0.0)
+                else:
+                    _t = engine.price_feed.fetch_ticker(base_sym)
+                    current_price = float(_t.get("last") or 0.0)
+            except Exception as _pe:
+                logger.warning(f"[PHANTOM] PRICE_FAIL | {base_sym} err={_pe}")
+                continue
+
+            if current_price <= 0:
+                continue
+
+            ph_signal_id = f"PH-{base_sym.replace('/', '')}-{_uuid_ph.uuid4().hex[:8]}"
+
+            for idx, (drop_pct, quote) in enumerate(zip(levels, quotes), start=1):
+                ph_sym = f"{base_sym}_LP{idx}"
+                try:
+                    if get_open_dca_position_for_symbol(ph_sym):
+                        continue
+                except Exception:
+                    continue
+
+                trigger_price = l1_avg * (1.0 - drop_pct / 100.0)
+                if current_price > trigger_price:
+                    logger.debug(
+                        f"[PHANTOM] WAIT | {ph_sym} "
+                        f"price={current_price:.4f} > trigger={trigger_price:.4f}"
+                    )
+                    continue
+
+                logger.warning(
+                    f"[PHANTOM] TRIGGER | {ph_sym} "
+                    f"price={current_price:.4f} <= {trigger_price:.4f} "
+                    f"(L1={l1_avg:.4f} -{drop_pct}%) -> opening"
+                )
+                _open_phantom_level(
+                    engine=engine, base_sym=base_sym, l1_price=l1_avg,
+                    level_idx=idx, drop_pct=drop_pct, quote=quote,
+                    signal_id=ph_signal_id, tp_pct=tp_pct,
+                    max_add_ons=max_add_ons, max_capital=max_capital,
+                )
+
+        except Exception as _e:
+            logger.warning(f"[PHANTOM] ERR | {base_sym} err={_e}")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1732,8 +1946,8 @@ def _check_cascade_exchange(engine, tp_sl_mgr) -> None:
             sym_positions = [
                 p for p in all_positions
                 if (
-                    _re_cas.sub(r'(_L\d+|_LP)$', '', str(p.get("symbol", "")).upper()) == sym.upper()
-                    and not str(p.get("symbol", "")).upper().endswith("_LP")
+                    _re_cas.sub(r'(_L\d+|_LP\d*)$', '', str(p.get("symbol", "")).upper()) == sym.upper()
+                    and not bool(__import__("re").search(r"_LP\d*$", str(p.get("symbol", "")).upper()))
                 )
             ]
 
@@ -2354,7 +2568,36 @@ def main():
             # L1 ღიაა AND LP არ არის → _open_lp_position()
             # ყოველ loop-ზე (120s) — MAX_OPEN_TRADES block-ის გვერდის ავლა
             # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            if _dca_enabled and _lp_enabled_flag:
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # PHANTOM OS (FIX #23) — price-triggered 5-level phantom
+            # PHANTOM_ENABLED=true → PHANTOM იმუშავებს (LP_ENABLED override)
+            # PHANTOM_ENABLED=false → ძველი single LP სისტემა
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            _phantom_enabled = os.getenv("PHANTOM_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+            if _dca_enabled and _phantom_enabled:
+                try:
+                    _ph_tp_pct     = float(os.getenv("DCA_TP_PCT", "0.55"))
+                    _ph_max_addons = int(os.getenv("DCA_MAX_ADD_ONS", "5"))
+                    _ph_quotes_str = os.getenv("PHANTOM_QUOTES", "50,50,50,50,50")
+                    try:
+                        _ph_max_quote = max(float(x.strip()) for x in _ph_quotes_str.split(",") if x.strip())
+                    except Exception:
+                        _ph_max_quote = 50.0
+                    _ph_sizes_str = os.getenv("DCA_ADDON_SIZES", "50,65,75,65,40")
+                    try:
+                        _ph_addon_sum = sum(float(x.strip()) for x in _ph_sizes_str.split(",") if x.strip())
+                    except Exception:
+                        _ph_addon_sum = 295.0
+                    _ph_max_cap = float(os.getenv("DCA_MAX_CAPITAL_USDT") or (_ph_max_quote + _ph_addon_sum))
+                    _check_and_open_phantom(
+                        engine=engine,
+                        tp_pct=_ph_tp_pct,
+                        max_add_ons=_ph_max_addons,
+                        max_capital=_ph_max_cap,
+                    )
+                except Exception as _phe:
+                    logger.warning(f"PHANTOM_CHECK_WARN | err={_phe}")
+            elif _dca_enabled and _lp_enabled_flag:
                 try:
                     _lp_tp_pct     = float(os.getenv("DCA_TP_PCT", "0.55"))
                     _lp_max_addons = int(os.getenv("DCA_MAX_ADD_ONS", "5"))
@@ -2577,7 +2820,7 @@ def main():
                                     _all_dca_cnt = get_all_open_dca_positions() or []
                                     _l1_open_cnt = sum(
                                         1 for _p in _all_dca_cnt
-                                        if not _re_main_cnt.search(r'(_L\d+|_LP)$', str(_p.get("symbol", "")))
+                                        if not _re_main_cnt.search(r'(_L\d+|_LP\d*)$', str(_p.get("symbol", "")))
                                     )
                                     _max_open_cnt = int(os.getenv("MAX_OPEN_TRADES", "6"))
                                     _at_max = _l1_open_cnt >= _max_open_cnt
