@@ -1407,6 +1407,31 @@ def _open_phantom_level(
             logger.warning(f"[PHANTOM] TG_FAIL | {ph_sym} err={_tg}")
         return
 
+    # LIVE: limit order @ target_price (LP_LIVE_USE_LIMIT=true)
+    #        market order @ current price (LP_LIVE_USE_LIMIT=false)
+    lp_live_limit = os.getenv("LP_LIVE_USE_LIMIT", "true").strip().lower() in ("1", "true", "yes")
+
+    if lp_live_limit:
+        try:
+            limit_qty = round(quote / target_price, 6)
+            order = engine.exchange.place_limit_buy(base_sym, limit_qty, target_price)
+            order_id = str(order.get("id", ""))
+            if not order_id:
+                raise ValueError("no order_id from limit order")
+            logger.warning(
+                f"[PHANTOM] LIVE_LIMIT_PLACED | {ph_sym} "
+                f"target={target_price:.4f} qty={limit_qty:.6f} order_id={order_id}"
+            )
+            try:
+                log_event("PHANTOM_LIMIT_PLACED",
+                    f"sym={ph_sym} level={level_idx} target={target_price:.4f} "
+                    f"qty={limit_qty:.6f} order_id={order_id}")
+            except Exception:
+                pass
+            return
+        except Exception as _le:
+            logger.warning(f"[PHANTOM] LIMIT_FAIL | {ph_sym} err={_le} -> fallback market")
+
     try:
         buy = engine.exchange.place_market_buy_by_quote(base_sym, quote)
         buy_price = float(buy.get("average") or buy.get("price") or l1_price)
@@ -1494,41 +1519,24 @@ def _check_and_open_phantom(engine, tp_pct: float, max_add_ons: int, max_capital
             if l1_avg <= 0:
                 continue
 
-            try:
-                if engine.exchange is not None:
-                    current_price = float(engine.exchange.fetch_last_price(base_sym) or 0.0)
-                else:
-                    _t = engine.price_feed.fetch_ticker(base_sym)
-                    current_price = float(_t.get("last") or 0.0)
-            except Exception as _pe:
-                logger.warning(f"[PHANTOM] PRICE_FAIL | {base_sym} err={_pe}")
-                continue
-
-            if current_price <= 0:
-                continue
-
             ph_signal_id = f"PH-{base_sym.replace('/', '')}-{_uuid_ph.uuid4().hex[:8]}"
 
+            # L1 გახსნისთანავე ყველა LP მყისიერად — price check არ სჭირდება
+            # DEMO: ვირტუალური entry @ L1_avg x (1 - drop_pct%)
+            # LIVE: limit order @ target_price → Binance
             for idx, (drop_pct, quote) in enumerate(zip(levels, quotes), start=1):
                 ph_sym = f"{base_sym}_LP{idx}"
                 try:
                     if get_open_dca_position_for_symbol(ph_sym):
+                        logger.debug(f"[PHANTOM] ALREADY_OPEN | {ph_sym} -> skip")
                         continue
                 except Exception:
                     continue
 
-                trigger_price = l1_avg * (1.0 - drop_pct / 100.0)
-                if current_price > trigger_price:
-                    logger.debug(
-                        f"[PHANTOM] WAIT | {ph_sym} "
-                        f"price={current_price:.4f} > trigger={trigger_price:.4f}"
-                    )
-                    continue
-
+                target = round(l1_avg * (1.0 - drop_pct / 100.0), 8)
                 logger.warning(
-                    f"[PHANTOM] TRIGGER | {ph_sym} "
-                    f"price={current_price:.4f} <= {trigger_price:.4f} "
-                    f"(L1={l1_avg:.4f} -{drop_pct}%) -> opening"
+                    f"[PHANTOM] OPEN | {ph_sym} "
+                    f"target={target:.4f} (L1={l1_avg:.4f} -{drop_pct}%)"
                 )
                 _open_phantom_level(
                     engine=engine, base_sym=base_sym, l1_price=l1_avg,
