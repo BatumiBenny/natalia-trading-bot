@@ -926,6 +926,89 @@ def main():
                             f"| id={signal_id}"
                         )
                         engine.execute_signal(sig)
+
+                        # ── DEMO: DCA position გახსნა ──────────────────────────────
+                        # LIVE-ზე: execution_engine.execute_signal() → place_market_buy()
+                        #          → open_dca_position() შიგნით იხსნება ✅
+                        # DEMO-ზე: buy dict ცარიელია → buy_avg=None → DCA ვერ იხსნება
+                        #          → _run_dca_loop() dca_positions-ს ვერ ხედავს
+                        #          → TP/ADD-ON არ მუშაობს
+                        # FIX: DEMO-ზე main.py-ი ხსნის price_cache-ის ფასით
+                        # LIVE-ზე: get_open_dca_position_for_symbol() = exists → skip ✅
+                        if engine.exchange is None and _dca_enabled:
+                            try:
+                                from execution.db.repository import (
+                                    open_dca_position, add_dca_order,
+                                    get_open_dca_position_for_symbol,
+                                )
+                                _sym = str((sig.get("execution") or {}).get("symbol", "BTC/USDT"))
+                                _quote = float(os.getenv("BOT_QUOTE_PER_TRADE", "20"))
+                                _tp_pct = float(os.getenv("DCA_TP_PCT", "0.55"))
+
+                                # double-open guard — LIVE-ზე execution_engine უკვე გახსნა
+                                if not get_open_dca_position_for_symbol(_sym):
+                                    _price = _price_cache.get(_sym, 0.0)
+                                    if _price <= 0:
+                                        try:
+                                            _t = engine.price_feed.fetch_ticker(_sym)
+                                            _price = float(_t.get("last") or 0.0)
+                                        except Exception:
+                                            pass
+                                    if _price > 0:
+                                        _qty = _quote / _price
+                                        _tp  = round(_price * (1.0 + _tp_pct / 100.0), 6)
+                                        _sizes_str = os.getenv("DCA_ADDON_SIZES", "15,20,22,20,12")
+                                        try:
+                                            _addon_sum = sum(float(x) for x in _sizes_str.split(",") if x.strip())
+                                        except Exception:
+                                            _addon_sum = 89.0
+                                        _max_cap = float(os.getenv("DCA_MAX_CAPITAL_USDT") or (_quote + _addon_sum))
+                                        _pos_id = open_dca_position(
+                                            symbol=_sym,
+                                            initial_entry_price=_price,
+                                            initial_qty=_qty,
+                                            initial_quote_spent=_quote,
+                                            tp_price=_tp,
+                                            sl_price=0.0,
+                                            tp_pct=_tp_pct,
+                                            sl_pct=999.0,
+                                            max_add_ons=int(os.getenv("DCA_MAX_ADD_ONS", "5")),
+                                            max_capital=_max_cap,
+                                            max_drawdown_pct=999.0,
+                                        )
+                                        add_dca_order(
+                                            position_id=_pos_id,
+                                            symbol=_sym,
+                                            order_type="INITIAL",
+                                            entry_price=_price,
+                                            qty=_qty,
+                                            quote_spent=_quote,
+                                            avg_entry_after=_price,
+                                            tp_after=_tp,
+                                            sl_after=0.0,
+                                            trigger_drawdown_pct=0.0,
+                                            exchange_order_id=signal_id,
+                                        )
+                                        logger.info(
+                                            f"[DEMO] DCA_OPENED | {_sym} "
+                                            f"price={_price:.4f} qty={_qty:.6f} "
+                                            f"tp={_tp:.4f} quote={_quote}"
+                                        )
+                                        try:
+                                            from execution.telegram_notifier import notify_signal_created
+                                            notify_signal_created(
+                                                symbol=_sym,
+                                                entry_price=_price,
+                                                quote_amount=_quote,
+                                                tp_price=_tp,
+                                                sl_price=0.0,
+                                                verdict=str(sig.get("final_verdict", "BUY")),
+                                                mode="DEMO",
+                                            )
+                                        except Exception as _tg:
+                                            logger.warning(f"[DEMO] TG_FAIL | {_sym} err={_tg}")
+                            except Exception as _de:
+                                logger.warning(f"[DEMO] DCA_OPEN_FAIL | err={_de}")
                     else:
                         logger.info(f"[AUTO] Unsupported verdict={verdict} | id={signal_id} → skip")
                 else:
